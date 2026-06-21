@@ -41,7 +41,7 @@ function LoginContent() {
 
         {error && (
           <p style={{ fontSize: 13, color: 'var(--danger)', background: 'rgba(239,122,99,.1)', padding: '10px 14px', borderRadius: 'var(--radius-sm)', width: '100%' }}>
-            Error de autenticación. Intenta nuevamente.
+            {error}
           </p>
         )}
 
