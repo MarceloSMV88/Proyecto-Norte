@@ -8,21 +8,18 @@ import Sidebar from '@/components/layout/Sidebar'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
 
-  if (!user) redirect('/login')
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
 
-  // Try to get the user's profile for initial render
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('user_id', user.id)
-    .single()
+  if (authError || !user) redirect('/login')
 
   return (
     <ThemeProvider>
       <AuthProvider>
-        <ProfileProvider ownProfile={profile}>
+        <ProfileProvider ownProfile={null}>
           <ToastProvider>
             <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
               <Sidebar />
