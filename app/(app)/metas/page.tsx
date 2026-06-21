@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { Plus } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -47,7 +47,7 @@ export default function MetasPage() {
     <div>
       <Topbar title="Metas" action={{ label: 'Nueva meta', onClick: () => setShowModal(true) }} />
 
-      <div style={{ padding: 'var(--pad)', display: 'flex', flexDirection: 'column', gap: 'var(--gap)' }}>
+      <div className="scroll">
 
         {/* Stats */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 'var(--gap)' }}>

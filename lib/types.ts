@@ -67,6 +67,7 @@ export interface Transaction {
   type: TransactionType
   recurring: boolean
   source: string | null
+  description: string | null
   date: string
   created_at: string
   categories?: { name: string; icon: string; color: string } | null

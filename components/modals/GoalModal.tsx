@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 import { useState } from 'react'
 import { X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -44,8 +44,8 @@ export default function GoalModal({ profileId, onClose, onSaved }: {
   }
 
   return (
-    <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal-box" style={{ borderTop: '3px solid var(--c-violet)' }}>
+    <div className="modal-scrim" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ borderTop: '3px solid var(--c-violet)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <h2 style={{ fontFamily: 'var(--font-ui)', fontSize: 17, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
             Crear nueva meta

@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
@@ -46,7 +46,7 @@ export default function PresupuestoPage() {
     <div>
       <Topbar title="Presupuesto" subtitle={new Date().toLocaleString('es-CL', { month: 'long', year: 'numeric' })} />
 
-      <div style={{ padding: 'var(--pad)', display: 'flex', flexDirection: 'column', gap: 'var(--gap)' }}>
+      <div className="scroll">
 
         {/* Banner listo para asignar */}
         <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>

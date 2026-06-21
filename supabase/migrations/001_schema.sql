@@ -215,7 +215,7 @@ begin
     0,
     p_user_id
   )
-  on conflict (user_id)
+  on conflict (user_id) where user_id is not null
   do update set
     name      = excluded.name,
     full_name = excluded.full_name,

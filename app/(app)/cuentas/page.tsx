@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { Plus } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -60,7 +60,7 @@ export default function CuentasPage() {
     <div>
       <Topbar title="Cuentas" action={{ label: 'Agregar cuenta', onClick: () => setAdding(true) }} />
 
-      <div style={{ padding: 'var(--pad)', display: 'flex', flexDirection: 'column', gap: 'var(--gap)' }}>
+      <div className="scroll">
 
         {/* Patrimonio neto */}
         <div className="card" style={{ background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%)' }}>

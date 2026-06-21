@@ -8,22 +8,17 @@ import Sidebar from '@/components/layout/Sidebar'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-
-  if (authError || !user) redirect('/login')
+  const { data: { user }, error } = await supabase.auth.getUser()
+  if (error || !user) redirect('/login')
 
   return (
     <ThemeProvider>
       <AuthProvider>
-        <ProfileProvider ownProfile={null}>
+        <ProfileProvider>
           <ToastProvider>
-            <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
+            <div className="shell">
               <Sidebar />
-              <div className="main-content" style={{ flex: 1 }}>
+              <div className="main">
                 {children}
               </div>
             </div>

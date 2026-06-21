@@ -17,31 +17,33 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>('dark')
   const [accent, setAccentState] = useState<AccentColor>('emerald')
   const [density, setDensityState] = useState<Density>('normal')
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
     const t = (localStorage.getItem('norte-theme') as Theme) || 'dark'
     const a = (localStorage.getItem('norte-accent') as AccentColor) || 'emerald'
     const d = (localStorage.getItem('norte-density') as Density) || 'normal'
     setThemeState(t); setAccentState(a); setDensityState(d)
+    setMounted(true)
   }, [])
 
-  const setTheme = (t: Theme) => { setThemeState(t); localStorage.setItem('norte-theme', t) }
-  const setAccent = (a: AccentColor) => { setAccentState(a); localStorage.setItem('norte-accent', a) }
-  const setDensity = (d: Density) => { setDensityState(d); localStorage.setItem('norte-density', d) }
+  const setTheme   = (t: Theme)       => { setThemeState(t);   localStorage.setItem('norte-theme', t) }
+  const setAccent  = (a: AccentColor) => { setAccentState(a);  localStorage.setItem('norte-accent', a) }
+  const setDensity = (d: Density)     => { setDensityState(d); localStorage.setItem('norte-density', d) }
 
   const cls = [
+    'app',
     theme === 'light' ? 'theme-light' : '',
-    `accent-${accent}`,
+    accent !== 'emerald' ? `accent-${accent}` : '',
     density === 'compact' ? 'dens-compact' : density === 'comfy' ? 'dens-comfy' : '',
+    'cards-borde',
   ].filter(Boolean).join(' ')
-
-  useEffect(() => {
-    document.body.className = cls
-  }, [cls])
 
   return (
     <ThemeContext.Provider value={{ theme, accent, density, setTheme, setAccent, setDensity }}>
-      {children}
+      <div className={cls} style={{ minHeight: '100vh' }}>
+        {children}
+      </div>
     </ThemeContext.Provider>
   )
 }

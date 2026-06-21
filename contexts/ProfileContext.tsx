@@ -1,6 +1,7 @@
 'use client'
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/contexts/AuthContext'
 import type { Profile } from '@/lib/types'
 
 interface ProfileContextValue {
@@ -12,28 +13,28 @@ interface ProfileContextValue {
 
 const ProfileContext = createContext<ProfileContextValue | null>(null)
 
-export function ProfileProvider({ children, ownProfile }: { children: React.ReactNode; ownProfile: Profile | null }) {
+export function ProfileProvider({ children }: { children: React.ReactNode }) {
+  const { profile } = useAuth()
   const [profiles, setProfiles] = useState<Profile[]>([])
-  const [activeProfile, setActiveProfileState] = useState<Profile | null>(ownProfile)
+  const [activeProfile, setActiveProfileState] = useState<Profile | null>(null)
   const supabase = createClient()
 
   const loadProfiles = useCallback(async () => {
-    if (!ownProfile) return
-    if (ownProfile.role === 'Admin') {
+    if (!profile) return
+    if (profile.role === 'Admin') {
       const { data } = await supabase.from('profiles').select('*').order('created_at')
       if (data) setProfiles(data as Profile[])
     } else {
-      setProfiles([ownProfile])
+      setProfiles([profile])
     }
-  }, [ownProfile, supabase])
+  }, [profile, supabase])
 
   useEffect(() => {
-    loadProfiles()
-  }, [loadProfiles])
-
-  useEffect(() => {
-    if (ownProfile && !activeProfile) setActiveProfileState(ownProfile)
-  }, [ownProfile, activeProfile])
+    if (profile) {
+      setActiveProfileState(prev => prev ?? profile)
+      loadProfiles()
+    }
+  }, [profile, loadProfiles])
 
   const setActiveProfile = (p: Profile) => setActiveProfileState(p)
   const refreshProfiles = loadProfiles

@@ -27,15 +27,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient()
 
   const loadProfile = useCallback(async (u: User) => {
-    const { data } = await supabase
-      .rpc('upsert_norte_profile', {
-        p_email: u.email,
-        p_name: u.user_metadata?.name || u.email?.split('@')[0] || 'Usuario',
-        p_full_name: u.user_metadata?.full_name || u.user_metadata?.name || '',
-        p_avatar_url: u.user_metadata?.avatar_url || '',
-        p_user_id: u.id,
-      })
-    if (data) setProfile(data as Profile)
+    const { data } = await supabase.rpc('upsert_norte_profile', {
+      p_email: u.email,
+      p_name: u.user_metadata?.name || u.email?.split('@')[0] || 'Usuario',
+      p_full_name: u.user_metadata?.full_name || u.user_metadata?.name || '',
+      p_avatar_url: u.user_metadata?.avatar_url || '',
+      p_user_id: u.id,
+    })
+
+    if (data) {
+      const p = data as Profile
+      setProfile(p)
+      // Seed default categories if this profile has none yet
+      const { count } = await supabase
+        .from('categories')
+        .select('id', { count: 'exact', head: true })
+        .eq('profile_id', p.id)
+      if ((count ?? 0) === 0) {
+        await supabase.rpc('seed_default_categories', { p_profile_id: p.id })
+      }
+    }
   }, [supabase])
 
   const refreshProfile = useCallback(async () => {
@@ -54,7 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const u = session?.user ?? null
       setUser(u)
       if (u) loadProfile(u)
-      else { setProfile(null) }
+      else setProfile(null)
     })
 
     return () => subscription.unsubscribe()

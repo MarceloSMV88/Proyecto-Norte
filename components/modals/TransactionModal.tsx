@@ -3,152 +3,149 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
+import DatePicker from '@/components/ui/DatePicker'
 import type { TransactionType, Category, Account } from '@/lib/types'
 
 type ModalType = 'gasto' | 'ingreso' | 'mover'
 
-const TYPE_COLOR: Record<ModalType, string> = {
-  gasto: 'var(--danger)',
-  ingreso: 'var(--ok)',
-  mover: 'var(--c-blue)',
+const CONFIG: Record<ModalType, { title: string; btnLabel: string }> = {
+  gasto:  { title: 'Agregar gasto',    btnLabel: 'Registrar gasto' },
+  ingreso:{ title: 'Agregar ingreso',  btnLabel: 'Registrar ingreso' },
+  mover:  { title: 'Mover dinero',     btnLabel: 'Registrar transferencia' },
 }
 
-const TYPE_LABEL: Record<ModalType, string> = {
-  gasto: 'Agregar gasto',
-  ingreso: 'Agregar ingreso',
-  mover: 'Mover dinero',
+const CAT_EMOJI: Record<string, string> = {
+  home: '🏠', cart: '🛒', car: '🚗', zap: '⚡', heart: '❤️',
+  film: '🎬', bag: '👜', target: '🎯', repeat: '🔄', utensils: '🍽️',
 }
 
-interface Props {
+export default function TransactionModal({ type, profileId, categories, accounts, onClose, onSaved }: {
   type: ModalType
   profileId: string
   categories: Category[]
   accounts: Account[]
   onClose: () => void
   onSaved: () => void
-}
-
-export default function TransactionModal({ type, profileId, categories, accounts, onClose, onSaved }: Props) {
-  const [amount, setAmount] = useState('')
-  const [name, setName] = useState('')
+}) {
+  const [rawAmount, setRawAmount] = useState('')
   const [categoryId, setCategoryId] = useState('')
+  const [description, setDescription] = useState('')
   const [accountId, setAccountId] = useState(accounts[0]?.id || '')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [saving, setSaving] = useState(false)
   const { showToast } = useToast()
   const supabase = createClient()
+  const cfg = CONFIG[type]
 
-  const accentColor = TYPE_COLOR[type]
+  const n = parseInt(rawAmount.replace(/\D/g, '')) || 0
+  const formatted = n > 0 ? n.toLocaleString('es-CL') : ''
+  const selectedCat = categories.find(c => c.id === categoryId)
+
+  const relevantCats = type === 'mover'
+    ? []
+    : categories.filter(c => type === 'ingreso' ? c.group_name === 'Ahorro' : c.group_name !== 'Ahorro')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const n = parseFloat(amount.replace(/\./g, '').replace(',', '.'))
-    if (!n || n <= 0) return
+    if (!n) return
     setSaving(true)
-
-    const txAmount = type === 'gasto' || type === 'mover' ? -Math.round(n) : Math.round(n)
-    const txType: TransactionType = type === 'mover' ? 'transfer' : type
 
     const { error } = await supabase.from('transactions').insert({
       profile_id: profileId,
-      name: name || (type === 'gasto' ? 'Gasto' : type === 'ingreso' ? 'Ingreso' : 'Transferencia'),
-      amount: txAmount,
-      type: txType,
+      name: selectedCat?.name ?? cfg.title,
+      description: description.trim() || null,
+      amount: type === 'ingreso' ? n : -n,
+      type: (type === 'mover' ? 'transfer' : type) as TransactionType,
       category_id: categoryId || null,
       account_id: accountId || null,
       date,
     })
 
     setSaving(false)
-    if (error) { showToast('Error al guardar. Intenta nuevamente.'); return }
-    showToast(type === 'gasto' ? '✓ Gasto registrado' : type === 'ingreso' ? '✓ Ingreso registrado' : '✓ Transferencia registrada')
+    if (error) { showToast('Error al guardar'); return }
+    showToast('✓ Registrado')
     onSaved()
     onClose()
   }
 
   return (
-    <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal-box" style={{ borderTop: `3px solid ${accentColor}` }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <h2 style={{ fontFamily: 'var(--font-ui)', fontSize: 17, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
-            {TYPE_LABEL[type]}
-          </h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 4 }}>
-            <X size={18} />
+    <div className="modal-scrim" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-head">
+          <h3>{cfg.title}</h3>
+          <button type="button" onClick={onClose} className="icon-btn ghost sm">
+            <X size={16} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Amount */}
-          <div style={{ textAlign: 'center', padding: '16px 0' }}>
-            <div style={{ fontSize: 13, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', marginBottom: 6 }}>Monto</div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-              <span style={{ fontSize: 28, fontWeight: 700, fontFamily: 'var(--font-ui)', color: accentColor }}>$</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={amount}
-                onChange={e => setAmount(e.target.value.replace(/[^0-9]/g, ''))}
-                placeholder="0"
-                autoFocus
-                style={{
-                  width: 160, border: 'none', background: 'transparent',
-                  fontSize: 36, fontWeight: 700, fontFamily: 'var(--font-ui)',
-                  color: accentColor, textAlign: 'center', outline: 'none',
-                }}
-              />
+        <form onSubmit={handleSubmit}>
+          {/* Monto */}
+          <div className="amount-field">
+            <span className="amount-cur">$</span>
+            <input
+              className="amount-input"
+              type="text"
+              inputMode="numeric"
+              placeholder="0"
+              autoFocus
+              value={formatted}
+              onChange={e => setRawAmount(e.target.value.replace(/\D/g, ''))}
+            />
+          </div>
+
+          {/* Categorías */}
+          {relevantCats.length > 0 && (
+            <>
+              <label className="field-label">Categoría</label>
+              <div className="chip-grid">
+                {relevantCats.map(c => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className={`chip${categoryId === c.id ? ' on' : ''}`}
+                    onClick={() => setCategoryId(categoryId === c.id ? '' : c.id)}
+                  >
+                    <span className={`chip-ic c-${c.color}`}>{CAT_EMOJI[c.icon] || '📌'}</span>
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Descripción */}
+          <label className="field-label" style={{ marginTop: 16 }}>Descripción</label>
+          <input
+            className="text-input"
+            type="text"
+            placeholder="Ej: Supermercado semanal, Factura luz…"
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            maxLength={120}
+          />
+
+          {/* Cuenta + Fecha */}
+          <div className="row-2" style={{ marginTop: 16 }}>
+            <div>
+              <label className="field-label">Cuenta</label>
+              <select value={accountId} onChange={e => setAccountId(e.target.value)}>
+                <option value="">Sin cuenta</option>
+                {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="field-label">Fecha</label>
+              <DatePicker value={date} onChange={setDate} />
             </div>
           </div>
 
-          <input
-            type="text"
-            placeholder={type === 'gasto' ? 'Descripción (ej: Supermercado)' : type === 'ingreso' ? 'Descripción (ej: Sueldo)' : 'Descripción'}
-            value={name}
-            onChange={e => setName(e.target.value)}
-            style={{ padding: '10px 14px', fontSize: 14, outline: 'none' }}
-          />
-
-          {type !== 'mover' && categories.length > 0 && (
-            <select
-              value={categoryId}
-              onChange={e => setCategoryId(e.target.value)}
-              style={{ padding: '10px 14px', fontSize: 14, outline: 'none', cursor: 'pointer' }}
-            >
-              <option value="">Sin categoría</option>
-              {categories.filter(c => type === 'ingreso' ? c.group_name === 'Ahorro' : true).map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          )}
-
-          <select
-            value={accountId}
-            onChange={e => setAccountId(e.target.value)}
-            style={{ padding: '10px 14px', fontSize: 14, outline: 'none', cursor: 'pointer' }}
-          >
-            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-
-          <input
-            type="date"
-            value={date}
-            onChange={e => setDate(e.target.value)}
-            style={{ padding: '10px 14px', fontSize: 14, outline: 'none' }}
-          />
-
           <button
             type="submit"
-            disabled={!amount || saving}
-            style={{
-              padding: '12px', borderRadius: 'var(--radius-sm)',
-              background: accentColor, color: type === 'ingreso' ? '#06140e' : 'white',
-              fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 15,
-              border: 'none', cursor: saving ? 'wait' : 'pointer',
-              opacity: !amount ? 0.5 : 1, transition: 'opacity .15s',
-              marginTop: 4,
-            }}
+            disabled={!n || saving}
+            className="btn-primary block"
+            style={{ opacity: n ? 1 : 0.4 }}
           >
-            {saving ? 'Guardando...' : TYPE_LABEL[type]}
+            {saving ? 'Guardando…' : cfg.btnLabel}
           </button>
         </form>
       </div>

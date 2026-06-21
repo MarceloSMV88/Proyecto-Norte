@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
@@ -81,7 +81,7 @@ export default function HabitosPage() {
     <div>
       <Topbar title="Hábitos" subtitle="Insights de tu comportamiento financiero" />
 
-      <div style={{ padding: 'var(--pad)', display: 'flex', flexDirection: 'column', gap: 'var(--gap)' }}>
+      <div className="scroll">
 
         {/* Insight cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 'var(--gap)' }}>
