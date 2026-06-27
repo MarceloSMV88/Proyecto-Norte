@@ -14,10 +14,17 @@ function isoToDisplay(iso: string): string {
   return d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-export default function DatePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export default function DatePicker({ value, onChange, placeholder, clearable, dropUp = true }: {
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  clearable?: boolean
+  dropUp?: boolean
+}) {
   const [open, setOpen] = useState(false)
-  const [viewYear, setViewYear] = useState(() => new Date(value + 'T12:00:00').getFullYear())
-  const [viewMonth, setViewMonth] = useState(() => new Date(value + 'T12:00:00').getMonth())
+  const initDate = value || new Date().toISOString().slice(0, 10)
+  const [viewYear, setViewYear] = useState(() => new Date(initDate + 'T12:00:00').getFullYear())
+  const [viewMonth, setViewMonth] = useState(() => new Date(initDate + 'T12:00:00').getMonth())
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -81,15 +88,29 @@ export default function DatePicker({ value, onChange }: { value: string; onChang
         onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--border-strong)')}
         onMouseLeave={e => (e.currentTarget.style.borderColor = open ? 'var(--accent)' : 'var(--border)')}
       >
-        <span>{isoToDisplay(value)}</span>
-        <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>📅</span>
+        <span style={{ color: value ? 'var(--text)' : 'var(--text-faint)' }}>
+          {value ? isoToDisplay(value) : (placeholder ?? 'Seleccionar fecha')}
+        </span>
+        {clearable && value ? (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={e => { e.stopPropagation(); onChange('') }}
+            style={{ color: 'var(--text-faint)', fontSize: 14, display: 'flex', alignItems: 'center', padding: '0 2px' }}
+            title="Quitar filtro"
+          >
+            ✕
+          </span>
+        ) : (
+          <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>📅</span>
+        )}
       </button>
 
       {/* Calendar dropdown */}
       {open && (
         <div style={{
           position: 'absolute',
-          bottom: '110%',
+          ...(dropUp ? { bottom: '110%' } : { top: '110%' }),
           right: 0,
           left: 'auto',
           zIndex: 200,

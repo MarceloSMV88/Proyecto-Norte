@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
 import TransactionModal from '@/components/modals/TransactionModal'
+import DatePicker from '@/components/ui/DatePicker'
 import { clp, formatDate } from '@/lib/utils'
 import type { Transaction, Category, Account } from '@/lib/types'
 
@@ -25,6 +26,7 @@ export default function MovimientosPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [filter, setFilter] = useState<TxFilter>('Todos')
   const [search, setSearch] = useState('')
+  const [dateFilter, setDateFilter] = useState('')
   const [modal, setModal] = useState<'gasto' | 'ingreso' | null>(null)
 
   const load = useCallback(async () => {
@@ -51,6 +53,7 @@ export default function MovimientosPage() {
     if (filter === 'Gastos' && tx.type !== 'gasto') return false
     if (filter === 'Ingresos' && tx.type !== 'ingreso') return false
     if (filter === 'Recurrentes' && !tx.recurring) return false
+    if (dateFilter && tx.date.slice(0, 10) !== dateFilter) return false
     if (search && !tx.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
@@ -68,7 +71,7 @@ export default function MovimientosPage() {
 
   return (
     <div>
-      <Topbar title="Movimientos" month={selectedMonth} onMonthChange={m => { setSelectedMonth(m); setFilter('Todos'); setSearch('') }} action={{ label: 'Agregar', onClick: () => setModal('gasto') }} />
+      <Topbar title="Movimientos" month={selectedMonth} onMonthChange={m => { setSelectedMonth(m); setFilter('Todos'); setSearch(''); setDateFilter('') }} action={{ label: 'Agregar', onClick: () => setModal('gasto') }} />
 
       <div className="scroll">
 
@@ -85,11 +88,15 @@ export default function MovimientosPage() {
         {/* Filters */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
-            <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-faint)' }} />
+            <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-faint)', zIndex: 1 }} />
             <input
-              type="text" placeholder="Buscar..." value={search} onChange={e => setSearch(e.target.value)}
-              style={{ width: '100%', padding: '9px 12px 9px 34px', fontSize: 13.5, outline: 'none', borderRadius: 'var(--radius-sm)' }}
+              className="text-input"
+              type="text" placeholder="Buscar movimiento…" value={search} onChange={e => setSearch(e.target.value)}
+              style={{ paddingLeft: 34 }}
             />
+          </div>
+          <div style={{ width: 170 }}>
+            <DatePicker value={dateFilter} onChange={setDateFilter} placeholder="Cualquier día" clearable dropUp={false} />
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             {(['Todos', 'Gastos', 'Ingresos', 'Recurrentes'] as TxFilter[]).map(f => (
