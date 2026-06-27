@@ -16,8 +16,10 @@ const COLOR_HEX: Record<string, string> = {
 export default function MetasPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7) + '-01')
   const [goals, setGoals] = useState<Goal[]>([])
   const [showModal, setShowModal] = useState(false)
+  const [editingGoal, setEditingGoal] = useState<Goal | null>(null)
   const [contributing, setContributing] = useState<string | null>(null)
   const [contributeVal, setContributeVal] = useState('')
 
@@ -45,7 +47,7 @@ export default function MetasPage() {
 
   return (
     <div>
-      <Topbar title="Metas" action={{ label: 'Nueva meta', onClick: () => setShowModal(true) }} />
+      <Topbar title="Metas" month={selectedMonth} onMonthChange={setSelectedMonth} action={{ label: 'Nueva meta', onClick: () => setShowModal(true) }} />
 
       <div className="scroll">
 
@@ -118,7 +120,12 @@ export default function MetasPage() {
                       style={{ flex: 1, padding: '9px', borderRadius: 'var(--radius-sm)', background: color + '15', color, border: `1px solid ${color}30`, fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
                       Aportar
                     </button>
-                    <button style={{ flex: 1, padding: '9px', borderRadius: 'var(--radius-sm)', background: 'var(--surface-2)', color: 'var(--text-2)', border: '1px solid var(--border)', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                    <button
+                      onClick={() => setEditingGoal(g)}
+                      style={{ flex: 1, padding: '9px', borderRadius: 'var(--radius-sm)', background: 'var(--surface-2)', color: 'var(--text-2)', border: '1px solid var(--border)', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, cursor: 'pointer', transition: 'background .15s' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-3)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'var(--surface-2)')}
+                    >
                       Ajustar
                     </button>
                   </div>
@@ -145,6 +152,9 @@ export default function MetasPage() {
 
       {showModal && (
         <GoalModal profileId={activeProfile.id} onClose={() => setShowModal(false)} onSaved={load} />
+      )}
+      {editingGoal && (
+        <GoalModal profileId={activeProfile.id} goal={editingGoal} onClose={() => setEditingGoal(null)} onSaved={load} />
       )}
     </div>
   )

@@ -13,6 +13,7 @@ const USAGE_LABEL = { alto: 'Alto uso', medio: 'Uso medio', bajo: 'Bajo uso' } a
 export default function HabitosPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7) + '-01')
   const [categories, setCategories] = useState<Category[]>([])
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([])
   const [months, setMonths] = useState<MonthlyBar[]>([])
@@ -20,7 +21,7 @@ export default function HabitosPage() {
   const load = useCallback(async () => {
     if (!activeProfile) return
     const pid = activeProfile.id
-    const month = new Date().toISOString().slice(0, 7) + '-01'
+    const month = selectedMonth
     const [cats, subs, txs] = await Promise.all([
       supabase.from('categories').select('*').eq('profile_id', pid).eq('month', month),
       supabase.from('subscriptions').select('*').eq('profile_id', pid).order('amount', { ascending: false }),
@@ -43,7 +44,7 @@ export default function HabitosPage() {
       partial: m === month.slice(0, 7),
     }))
     setMonths(bars)
-  }, [activeProfile, supabase])
+  }, [activeProfile, supabase, selectedMonth])
 
   useEffect(() => { load() }, [load])
 
@@ -79,7 +80,7 @@ export default function HabitosPage() {
 
   return (
     <div>
-      <Topbar title="Hábitos" subtitle="Insights de tu comportamiento financiero" />
+      <Topbar title="Hábitos" subtitle="Insights de tu comportamiento financiero" month={selectedMonth} onMonthChange={setSelectedMonth} />
 
       <div className="scroll">
 

@@ -1,24 +1,27 @@
 'use client'
-import { ChevronLeft, ChevronRight, Calendar, Search, Bell, Plus } from 'lucide-react'
-import { useState } from 'react'
+import { ChevronLeft, ChevronRight, Calendar, Plus } from 'lucide-react'
 
 interface TopbarProps {
   title: string
   subtitle?: string
   action?: { label: string; onClick: () => void; icon?: React.ReactNode }
+  month?: string          // format: '2026-06-01'
+  onMonthChange?: (m: string) => void
 }
 
-function getMonthLabel(offset: number): string {
-  const d = new Date()
-  d.setMonth(d.getMonth() + offset)
-  return d.toLocaleString('es-CL', { month: 'long', year: 'numeric' })
+function fmtMonth(month: string): string {
+  return new Date(month + 'T12:00:00')
+    .toLocaleString('es-CL', { month: 'long', year: 'numeric' })
     .replace(/^./, c => c.toUpperCase())
 }
 
-export default function Topbar({ title, subtitle, action }: TopbarProps) {
-  const [monthOffset, setMonthOffset] = useState(0)
-  const monthLabel = getMonthLabel(monthOffset)
+function shiftMonth(month: string, delta: number): string {
+  const d = new Date(month + 'T12:00:00')
+  d.setMonth(d.getMonth() + delta)
+  return d.toISOString().slice(0, 7) + '-01'
+}
 
+export default function Topbar({ title, subtitle, action, month, onMonthChange }: TopbarProps) {
   return (
     <header className="topbar">
       <div>
@@ -27,30 +30,21 @@ export default function Topbar({ title, subtitle, action }: TopbarProps) {
       </div>
 
       <div className="topbar-r">
-        {/* Month picker */}
-        <div className="month-pick">
-          <button className="icon-btn" onClick={() => setMonthOffset(o => o - 1)} aria-label="Mes anterior">
-            <ChevronLeft size={18} />
-          </button>
-          <span className="month-label">
-            <Calendar size={15} />
-            {monthLabel}
-          </span>
-          <button className="icon-btn" onClick={() => setMonthOffset(o => o + 1)} aria-label="Mes siguiente">
-            <ChevronRight size={18} />
-          </button>
-        </div>
-
-        {/* Search */}
-        <button className="icon-btn ghost" aria-label="Buscar">
-          <Search size={18} />
-        </button>
-
-        {/* Bell */}
-        <button className="icon-btn ghost bell" aria-label="Alertas" style={{ position: 'relative' }}>
-          <Bell size={18} />
-          <span className="ping" />
-        </button>
+        {/* Month picker — only when parent provides month state */}
+        {month && onMonthChange && (
+          <div className="month-pick">
+            <button className="icon-btn" onClick={() => onMonthChange(shiftMonth(month, -1))} aria-label="Mes anterior">
+              <ChevronLeft size={18} />
+            </button>
+            <span className="month-label">
+              <Calendar size={15} />
+              {fmtMonth(month)}
+            </span>
+            <button className="icon-btn" onClick={() => onMonthChange(shiftMonth(month, 1))} aria-label="Mes siguiente">
+              <ChevronRight size={18} />
+            </button>
+          </div>
+        )}
 
         {/* Action button */}
         {action && (

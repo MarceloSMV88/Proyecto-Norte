@@ -12,6 +12,7 @@ const GROUPS: CategoryGroup[] = ['Fijos', 'Variables', 'Ahorro']
 export default function PresupuestoPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7) + '-01')
   const [categories, setCategories] = useState<Category[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [editing, setEditing] = useState<string | null>(null)
@@ -19,14 +20,13 @@ export default function PresupuestoPage() {
 
   const load = useCallback(async () => {
     if (!activeProfile) return
-    const month = new Date().toISOString().slice(0, 7) + '-01'
     const [cats, accs] = await Promise.all([
-      supabase.from('categories').select('*').eq('profile_id', activeProfile.id).eq('month', month).order('created_at'),
+      supabase.from('categories').select('*').eq('profile_id', activeProfile.id).eq('month', selectedMonth).order('created_at'),
       supabase.from('accounts').select('*').eq('profile_id', activeProfile.id),
     ])
     setCategories((cats.data || []) as Category[])
     setAccounts((accs.data || []) as Account[])
-  }, [activeProfile, supabase])
+  }, [activeProfile, supabase, selectedMonth])
 
   useEffect(() => { load() }, [load])
 
@@ -44,7 +44,7 @@ export default function PresupuestoPage() {
 
   return (
     <div>
-      <Topbar title="Presupuesto" subtitle={new Date().toLocaleString('es-CL', { month: 'long', year: 'numeric' })} />
+      <Topbar title="Presupuesto" month={selectedMonth} onMonthChange={setSelectedMonth} />
 
       <div className="scroll">
 
@@ -116,8 +116,8 @@ export default function PresupuestoPage() {
               </div>
 
               {/* Header row */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px 1fr 90px 36px', gap: 12, padding: '0 8px 8px', borderBottom: '1px solid var(--hairline)' }}>
-                {['Categoría', 'Asignado', 'Gastado / Disponible', 'Disponible', ''].map(h => (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px 1fr 90px', gap: 12, padding: '0 8px 8px', borderBottom: '1px solid var(--hairline)' }}>
+                {['Categoría', 'Asignado', 'Gastado / Disponible', 'Disponible'].map(h => (
                   <span key={h} style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '.4px' }}>{h}</span>
                 ))}
               </div>
@@ -129,7 +129,7 @@ export default function PresupuestoPage() {
                   const disp = cat.assigned - cat.spent
 
                   return (
-                    <div key={cat.id} style={{ display: 'grid', gridTemplateColumns: '1fr 110px 1fr 90px 36px', gap: 12, padding: '10px 8px', borderRadius: 10, alignItems: 'center', transition: 'background .15s' }}
+                    <div key={cat.id} style={{ display: 'grid', gridTemplateColumns: '1fr 110px 1fr 90px', gap: 12, padding: '10px 8px', borderRadius: 10, alignItems: 'center', transition: 'background .15s' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                     >
@@ -172,7 +172,6 @@ export default function PresupuestoPage() {
                         {clp(disp)}
                       </span>
 
-                      <button title="Mover dinero" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', fontSize: 16, padding: 4 }}>⇄</button>
                     </div>
                   )
                 })}

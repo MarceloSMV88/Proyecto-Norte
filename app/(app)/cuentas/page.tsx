@@ -22,6 +22,7 @@ export default function CuentasPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
   const { showToast } = useToast()
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7) + '-01')
   const [accounts, setAccounts] = useState<Account[]>([])
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({ name: '', bank: '', type: 'Cuenta' as AccountType, balance: '', color: 'emerald' })
@@ -58,7 +59,7 @@ export default function CuentasPage() {
 
   return (
     <div>
-      <Topbar title="Cuentas" action={{ label: 'Agregar cuenta', onClick: () => setAdding(true) }} />
+      <Topbar title="Cuentas" action={{ label: 'Agregar cuenta', onClick: () => setAdding(true) }} month={selectedMonth} onMonthChange={setSelectedMonth} />
 
       <div className="scroll">
 

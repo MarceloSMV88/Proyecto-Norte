@@ -28,6 +28,7 @@ export default function AjustesPage() {
   const { profiles, activeProfile, refreshProfiles } = useProfiles()
   const { theme, accent, density, setTheme, setAccent, setDensity } = useTheme()
   const { showToast } = useToast()
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7) + '-01')
   const supabase = createClient()
   const [showProfileModal, setShowProfileModal] = useState(false)
 
@@ -53,7 +54,7 @@ export default function AjustesPage() {
 
   return (
     <div>
-      <Topbar title="Ajustes" />
+      <Topbar title="Ajustes" month={selectedMonth} onMonthChange={setSelectedMonth} />
 
       <div style={{ padding: 'var(--pad)', display: 'flex', flexDirection: 'column', gap: 'var(--gap)', maxWidth: 700 }}>
 

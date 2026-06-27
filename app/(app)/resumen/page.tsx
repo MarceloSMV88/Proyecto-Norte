@@ -25,6 +25,7 @@ export default function ResumenPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
 
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7) + '-01')
   const [categories, setCategories] = useState<Category[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [goals, setGoals] = useState<Goal[]>([])
@@ -38,13 +39,19 @@ export default function ResumenPage() {
   const load = useCallback(async () => {
     if (!activeProfile) return
     const pid = activeProfile.id
-    const month = new Date().toISOString().slice(0, 7) + '-01'
+    // Compute next month for range queries
+    const nextM = new Date(selectedMonth + 'T12:00:00')
+    nextM.setMonth(nextM.getMonth() + 1)
+    const nextMonthStr = nextM.toISOString().slice(0, 7) + '-01'
+
     const [cats, accs, gls, txs, upcs] = await Promise.all([
-      supabase.from('categories').select('*').eq('profile_id', pid).eq('month', month),
+      supabase.from('categories').select('*').eq('profile_id', pid).eq('month', selectedMonth),
       supabase.from('accounts').select('*').eq('profile_id', pid),
       supabase.from('goals').select('*').eq('profile_id', pid).order('created_at').limit(3),
       supabase.from('transactions').select('*, categories(name,icon,color), accounts(name)')
-        .eq('profile_id', pid).order('date', { ascending: false }).limit(200),
+        .eq('profile_id', pid)
+        .gte('date', selectedMonth).lt('date', nextMonthStr)
+        .order('date', { ascending: false }).limit(200),
       supabase.from('upcoming').select('*, categories(name,icon), accounts(name)')
         .eq('profile_id', pid).order('due_date').limit(4),
     ])
@@ -54,30 +61,34 @@ export default function ResumenPage() {
     setTransactions((txs.data || []) as Transaction[])
     setUpcoming((upcs.data || []) as Upcoming[])
 
-    // Build monthly bars from all transactions
-    const allTxs = (txs.data || []) as Transaction[]
+    // Build monthly bars (always last 6 months regardless of selectedMonth)
+    const allTxs6m = (await supabase.from('transactions').select('date,amount,type')
+      .eq('profile_id', pid).order('date').limit(500)).data || []
     const byMonth: Record<string, { income: number; expense: number }> = {}
-    for (const tx of allTxs) {
+    for (const tx of allTxs6m as Transaction[]) {
       const m = tx.date.slice(0, 7)
       if (!byMonth[m]) byMonth[m] = { income: 0, expense: 0 }
       if (tx.amount > 0) byMonth[m].income += tx.amount
       else if (tx.type === 'gasto') byMonth[m].expense += Math.abs(tx.amount)
     }
-    const curMonth = new Date().toISOString().slice(0, 7)
+    const curMonth = selectedMonth.slice(0, 7)
     const bars = Object.entries(byMonth).slice(-6).map(([m, v]) => ({
       m: new Date(m + '-15').toLocaleString('es-CL', { month: 'short' }),
       income: v.income, expense: v.expense,
       partial: m === curMonth,
     }))
     setMonths(bars)
-  }, [activeProfile, supabase])
+  }, [activeProfile, supabase, selectedMonth])
 
   useEffect(() => { load() }, [load])
 
   if (!activeProfile) return null
 
-  const daysLeft = getDaysLeftInMonth()
-  const totalDays = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate()
+  // For selected month: use real daysLeft only for current month, otherwise use full month
+  const isCurrentMonth = selectedMonth.slice(0, 7) === new Date().toISOString().slice(0, 7)
+  const selDate = new Date(selectedMonth + 'T12:00:00')
+  const totalDays = new Date(selDate.getFullYear(), selDate.getMonth() + 1, 0).getDate()
+  const daysLeft = isCurrentMonth ? getDaysLeftInMonth() : totalDays
   const s = computeSummary(categories, accounts, activeProfile.income, daysLeft)
   const varPct = s.variableAssigned > 0 ? Math.round((s.variableSpent / s.variableAssigned) * 100) : 0
 
@@ -114,7 +125,7 @@ export default function ResumenPage() {
 
   return (
     <>
-      <Topbar title={`Hola, ${activeProfile.name}`} subtitle="Vas bien este mes. Esto es lo que importa hoy." />
+      <Topbar title={`Hola, ${activeProfile.name}`} subtitle="Vas bien este mes. Esto es lo que importa hoy." month={selectedMonth} onMonthChange={m => { setSelectedMonth(m); setExpandedCat(null) }} />
       <div className="scroll">
 
         {/* ── Hero ── */}

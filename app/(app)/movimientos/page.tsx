@@ -10,9 +10,16 @@ import type { Transaction, Category, Account } from '@/lib/types'
 
 type TxFilter = 'Todos' | 'Gastos' | 'Ingresos' | 'Recurrentes'
 
+function nextMonthStr(month: string): string {
+  const d = new Date(month + 'T12:00:00')
+  d.setMonth(d.getMonth() + 1)
+  return d.toISOString().slice(0, 7) + '-01'
+}
+
 export default function MovimientosPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7) + '-01')
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -24,14 +31,17 @@ export default function MovimientosPage() {
     if (!activeProfile) return
     const [txs, cats, accs] = await Promise.all([
       supabase.from('transactions').select('*, categories(name,icon,color), accounts(name)')
-        .eq('profile_id', activeProfile.id).order('date', { ascending: false }).order('created_at', { ascending: false }).limit(100),
+        .eq('profile_id', activeProfile.id)
+        .gte('date', selectedMonth)
+        .lt('date', nextMonthStr(selectedMonth))
+        .order('date', { ascending: false }).order('created_at', { ascending: false }).limit(200),
       supabase.from('categories').select('*').eq('profile_id', activeProfile.id),
       supabase.from('accounts').select('*').eq('profile_id', activeProfile.id),
     ])
     setTransactions((txs.data || []) as Transaction[])
     setCategories((cats.data || []) as Category[])
     setAccounts((accs.data || []) as Account[])
-  }, [activeProfile, supabase])
+  }, [activeProfile, supabase, selectedMonth])
 
   useEffect(() => { load() }, [load])
 
@@ -58,7 +68,7 @@ export default function MovimientosPage() {
 
   return (
     <div>
-      <Topbar title="Movimientos" action={{ label: 'Agregar', onClick: () => setModal('gasto') }} />
+      <Topbar title="Movimientos" month={selectedMonth} onMonthChange={m => { setSelectedMonth(m); setFilter('Todos'); setSearch('') }} action={{ label: 'Agregar', onClick: () => setModal('gasto') }} />
 
       <div className="scroll">
 

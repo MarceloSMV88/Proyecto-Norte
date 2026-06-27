@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { X, Flag } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
-import type { AccentColor } from '@/lib/types'
+import type { AccentColor, Goal } from '@/lib/types'
 
 const COLORS: { key: AccentColor; hex: string; label: string }[] = [
   { key: 'emerald', hex: '#34c98a', label: 'Verde' },
@@ -13,14 +13,20 @@ const COLORS: { key: AccentColor; hex: string; label: string }[] = [
   { key: 'red',     hex: '#ef7a63', label: 'Rojo' },
 ]
 
-export default function GoalModal({ profileId, onClose, onSaved }: {
-  profileId: string; onClose: () => void; onSaved: () => void
-}) {
-  const [name, setName]       = useState('')
-  const [target, setTarget]   = useState('')
-  const [monthly, setMonthly] = useState('')
-  const [due, setDue]         = useState('')
-  const [color, setColor]     = useState<AccentColor>('violet')
+interface GoalModalProps {
+  profileId: string
+  goal?: Goal        // if provided → edit mode
+  onClose: () => void
+  onSaved: () => void
+}
+
+export default function GoalModal({ profileId, goal, onClose, onSaved }: GoalModalProps) {
+  const isEdit = !!goal
+  const [name, setName]       = useState(goal?.name ?? '')
+  const [target, setTarget]   = useState(goal ? String(goal.target) : '')
+  const [monthly, setMonthly] = useState(goal ? String(goal.monthly) : '')
+  const [due, setDue]         = useState(goal?.due ?? '')
+  const [color, setColor]     = useState<AccentColor>(goal?.color ?? 'violet')
   const [saving, setSaving]   = useState(false)
   const { showToast } = useToast()
   const supabase = createClient()
@@ -33,18 +39,22 @@ export default function GoalModal({ profileId, onClose, onSaved }: {
     e.preventDefault()
     if (!name || !n) return
     setSaving(true)
-    const { error } = await supabase.from('goals').insert({
-      profile_id: profileId,
+
+    const payload = {
       name: name.trim(),
       target: n,
-      current: 0,
       monthly: parseInt(monthly.replace(/\D/g, '')) || 0,
       due: due.trim() || null,
       color,
-    })
+    }
+
+    const { error } = isEdit
+      ? await supabase.from('goals').update(payload).eq('id', goal!.id)
+      : await supabase.from('goals').insert({ ...payload, profile_id: profileId, current: 0 })
+
     setSaving(false)
     if (error) { showToast('Error al guardar'); return }
-    showToast('✓ Meta creada')
+    showToast(isEdit ? '✓ Meta actualizada' : '✓ Meta creada')
     onSaved(); onClose()
   }
 
@@ -54,7 +64,7 @@ export default function GoalModal({ profileId, onClose, onSaved }: {
         <div className="modal-head">
           <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Flag size={17} style={{ color: selectedColor.hex }} />
-            Nueva meta
+            {isEdit ? 'Editar meta' : 'Nueva meta'}
           </h3>
           <button type="button" onClick={onClose} className="icon-btn ghost sm">
             <X size={16} />
@@ -62,7 +72,6 @@ export default function GoalModal({ profileId, onClose, onSaved }: {
         </div>
 
         <form onSubmit={handleSubmit}>
-          {/* Nombre */}
           <label className="field-label">Nombre</label>
           <input
             className="text-input"
@@ -74,7 +83,6 @@ export default function GoalModal({ profileId, onClose, onSaved }: {
             maxLength={60}
           />
 
-          {/* Objetivo */}
           <label className="field-label" style={{ marginTop: 16 }}>Objetivo ($)</label>
           <div className="amount-field">
             <span className="amount-cur">$</span>
@@ -88,7 +96,6 @@ export default function GoalModal({ profileId, onClose, onSaved }: {
             />
           </div>
 
-          {/* Aporte mensual + Fecha */}
           <div className="row-2" style={{ marginTop: 4 }}>
             <div>
               <label className="field-label">Aporte mensual ($)</label>
@@ -97,7 +104,7 @@ export default function GoalModal({ profileId, onClose, onSaved }: {
                 type="text"
                 inputMode="numeric"
                 placeholder="Opcional"
-                value={monthly}
+                value={monthly ? parseInt(monthly).toLocaleString('es-CL') : ''}
                 onChange={e => setMonthly(e.target.value.replace(/\D/g, ''))}
               />
             </div>
@@ -113,7 +120,6 @@ export default function GoalModal({ profileId, onClose, onSaved }: {
             </div>
           </div>
 
-          {/* Color */}
           <label className="field-label" style={{ marginTop: 16 }}>Color</label>
           <div style={{ display: 'flex', gap: 10 }}>
             {COLORS.map(c => (
@@ -125,7 +131,7 @@ export default function GoalModal({ profileId, onClose, onSaved }: {
                 style={{
                   width: 30, height: 30, borderRadius: '50%',
                   background: c.hex,
-                  border: color === c.key ? `3px solid var(--text)` : '3px solid transparent',
+                  border: color === c.key ? '3px solid var(--text)' : '3px solid transparent',
                   cursor: 'pointer', transition: 'border .15s, transform .1s',
                   transform: color === c.key ? 'scale(1.15)' : 'scale(1)',
                 }}
@@ -139,7 +145,7 @@ export default function GoalModal({ profileId, onClose, onSaved }: {
             className="btn-primary block"
             style={{ background: selectedColor.hex, opacity: name && n ? 1 : 0.4 }}
           >
-            {saving ? 'Guardando…' : 'Crear meta'}
+            {saving ? 'Guardando…' : isEdit ? 'Guardar cambios' : 'Crear meta'}
           </button>
         </form>
       </div>
