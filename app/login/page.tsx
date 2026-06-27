@@ -5,8 +5,10 @@ import { Suspense } from 'react'
 
 function Logo() {
   return (
-    <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-      <path d="M18 2L22.5 13.5L34 18L22.5 22.5L18 34L13.5 22.5L2 18L13.5 13.5Z" fill="var(--accent)" />
+    <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+      <rect width="40" height="40" rx="12" fill="var(--surface-2)" />
+      <path d="M20 5L24.5 16.5L36 20L24.5 23.5L20 35L15.5 23.5L4 20L15.5 16.5Z" fill="var(--accent)" />
+      <circle cx="20" cy="20" r="3" fill="var(--surface-2)" />
     </svg>
   )
 }
@@ -27,24 +29,53 @@ function LoginContent() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
-      <div className="card w-full max-w-sm" style={{ padding: 40, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'var(--bg)',
+      padding: 24,
+    }}>
+      <div className="card" style={{
+        width: '100%',
+        maxWidth: 400,
+        padding: '44px 40px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 28,
+        boxShadow: 'var(--shadow)',
+      }}>
+        {/* Brand */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
           <Logo />
-          <h1 style={{ fontFamily: 'var(--font-ui)', fontSize: 26, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
-            Norte
-          </h1>
-          <p style={{ fontSize: 14, color: 'var(--text-2)', margin: 0 }}>
-            Finanzas personales y familiares
-          </p>
+          <div style={{ textAlign: 'center' }}>
+            <h1 style={{ fontFamily: 'var(--font-ui)', fontSize: 28, fontWeight: 700, color: 'var(--text)', margin: 0, letterSpacing: '-0.7px' }}>
+              Norte
+            </h1>
+            <p style={{ fontSize: 14, color: 'var(--text-2)', margin: '6px 0 0' }}>
+              Finanzas personales y familiares
+            </p>
+          </div>
         </div>
 
+        {/* Divider */}
+        <div style={{ width: '100%', height: 1, background: 'var(--hairline)' }} />
+
+        {/* Error */}
         {error && (
-          <p style={{ fontSize: 13, color: 'var(--danger)', background: 'rgba(239,122,99,.1)', padding: '10px 14px', borderRadius: 'var(--radius-sm)', width: '100%' }}>
+          <p style={{
+            fontSize: 13, color: 'var(--danger)',
+            background: 'color-mix(in oklab, var(--danger) 10%, transparent)',
+            padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+            width: '100%', margin: 0, textAlign: 'center',
+          }}>
             {error}
           </p>
         )}
 
+        {/* Google button */}
         <button
           onClick={signInWithGoogle}
           style={{
@@ -55,24 +86,25 @@ function LoginContent() {
             gap: 10,
             padding: '13px 20px',
             borderRadius: 'var(--radius-sm)',
-            background: 'var(--accent)',
-            color: '#06140e',
+            background: 'var(--surface-2)',
+            border: '1px solid var(--border)',
+            color: 'var(--text)',
             fontFamily: 'var(--font-ui)',
             fontWeight: 600,
             fontSize: 14.5,
-            border: 'none',
             cursor: 'pointer',
-            transition: 'opacity .15s',
+            transition: 'background .15s, border-color .15s',
           }}
-          onMouseEnter={e => (e.currentTarget.style.opacity = '.88')}
-          onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-3)'; e.currentTarget.style.borderColor = 'var(--border-strong)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'var(--surface-2)'; e.currentTarget.style.borderColor = 'var(--border)' }}
         >
           <GoogleIcon />
           Continuar con Google
         </button>
 
-        <p style={{ fontSize: 12, color: 'var(--text-faint)', lineHeight: 1.5, margin: 0 }}>
-          Al continuar, aceptas el uso de tus datos para acceder a la app. Solo se admite el acceso por invitación del administrador del hogar.
+        {/* Accept button variant */}
+        <p style={{ fontSize: 12, color: 'var(--text-faint)', lineHeight: 1.6, margin: 0, textAlign: 'center', maxWidth: 300 }}>
+          Solo se admite el acceso por invitación. Al continuar, aceptas el uso de tus datos para el funcionamiento de la app.
         </p>
       </div>
     </div>

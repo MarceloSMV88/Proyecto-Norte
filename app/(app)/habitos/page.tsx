@@ -84,51 +84,47 @@ export default function HabitosPage() {
       <div className="scroll">
 
         {/* Insight cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 'var(--gap)' }}>
-          <div className="card" style={{ borderLeft: '3px solid var(--accent)' }}>
-            <div style={{ fontSize: 12, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', marginBottom: 8 }}>Resumen del mes</div>
-            <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'var(--font-ui)', color: 'var(--text)', marginBottom: 4 }}>{clp(spentTotal)}</div>
-            <div style={{ fontSize: 13, color: 'var(--text-2)' }}>
-              Promedio diario: <strong style={{ color: 'var(--text)' }}>{clp(avgDaily)}</strong>
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 4 }}>
-              Proyección fin de mes: <strong style={{ color: projectedEnd > activeProfile.income ? 'var(--danger)' : 'var(--ok)' }}>{clp(projectedEnd)}</strong>
-            </div>
+        <div className="habit-insights">
+          <div className="card insight-card accent-tint">
+            <div className="insight-eyebrow">✦ Resumen</div>
+            <p className="insight-text">
+              Gastas en promedio <b>{clp(avgDaily)}</b> al día.
+              Proyección fin de mes: <b style={{ color: projectedEnd > activeProfile.income ? 'var(--danger)' : 'var(--ok)' }}>{clp(projectedEnd)}</b>.
+            </p>
           </div>
 
-          <div className="card" style={{ borderLeft: '3px solid var(--c-violet)' }}>
-            <div style={{ fontSize: 12, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', marginBottom: 8 }}>Suscripciones</div>
-            <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'var(--font-ui)', color: 'var(--text)', marginBottom: 4 }}>{clp(subsTotal)}/mes</div>
-            {unusedAmount > 0 && (
-              <div style={{ fontSize: 13, color: 'var(--danger)' }}>
-                {clp(unusedAmount)}/mes en suscripciones con bajo uso
-              </div>
-            )}
+          <div className="card insight-card">
+            <div className="insight-eyebrow" style={{ color: 'var(--c-violet)' }}>↻ Suscripciones</div>
+            <p className="insight-text">
+              <b>{clp(subsTotal)}</b> al mes en {subscriptions.length} servicios.
+              {unusedAmount > 0 && <> <b style={{ color: 'var(--warn)' }}>{clp(unusedAmount)}</b> en suscripciones con bajo uso.</>}
+            </p>
           </div>
 
-          {leaksTotal > 0 && (
-            <div className="card" style={{ borderLeft: '3px solid var(--danger)' }}>
-              <div style={{ fontSize: 12, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', marginBottom: 8 }}>Posibles fugas</div>
-              <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'var(--font-ui)', color: 'var(--danger)', marginBottom: 4 }}>{clp(leaksTotal)}</div>
-              <div style={{ fontSize: 13, color: 'var(--text-2)' }}>Recorte potencial al mes</div>
-            </div>
-          )}
+          <div className="card insight-card">
+            <div className="insight-eyebrow">↗ Proyección fin de mes</div>
+            <p className="insight-text">
+              Si sigues así, cerrarás el mes en <b style={{ color: projectedEnd > activeProfile.income ? 'var(--danger)' : 'var(--ok)' }}>{clp(projectedEnd)}</b> de gasto.
+              {leaksTotal > 0 && <> Recorte potencial: <b className="ok">{clp(leaksTotal)}</b>.</>}
+            </p>
+          </div>
         </div>
 
         {/* Dónde gastas más */}
         {topCats.length > 0 && (
           <div className="card">
-            <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Dónde gastas más</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="card-head"><h3 className="card-title">Dónde gastas más</h3></div>
+            <div className="hbars">
               {topCats.map(cat => (
-                <div key={cat.id}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', fontFamily: 'var(--font-ui)' }}>{cat.name}</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-ui)', color: 'var(--text)' }}>{clpShort(cat.spent)}</span>
+                <div key={cat.id} className="hbar">
+                  <div className="hbar-cat">
+                    <span style={{ width: 10, height: 10, borderRadius: 3, background: COLOR_HEX[cat.color] || 'var(--accent)', display: 'inline-block', flexShrink: 0 }} />
+                    {cat.name}
                   </div>
-                  <div className="progress-track">
-                    <div className="progress-fill" style={{ width: `${(cat.spent / maxCatSpent) * 100}%`, background: COLOR_HEX[cat.color] || 'var(--accent)' }} />
+                  <div className="hbar-track">
+                    <div className="hbar-fill" style={{ width: `${(cat.spent / maxCatSpent) * 100}%`, background: COLOR_HEX[cat.color] || 'var(--accent)' }} />
                   </div>
+                  <div className="hbar-val">{clpShort(cat.spent)}</div>
                 </div>
               ))}
             </div>

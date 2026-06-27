@@ -63,16 +63,22 @@ export default function CuentasPage() {
       <div className="scroll">
 
         {/* Patrimonio neto */}
-        <div className="card" style={{ background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%)' }}>
-          <div style={{ fontSize: 12, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', marginBottom: 4 }}>Patrimonio neto</div>
-          <div style={{ fontSize: 44, fontWeight: 700, fontFamily: 'var(--font-ui)', letterSpacing: '-2px', color: patrimonio >= 0 ? 'var(--text)' : 'var(--danger)', marginBottom: 16 }}>
-            {clp(patrimonio)}
+        <div className="card networth">
+          <div className="nw-l">
+            <div style={{ fontSize: 12, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '.5px' }}>Patrimonio neto</div>
+            <div className={`nw-amount${patrimonio < 0 ? ' red' : ''}`}>{clp(patrimonio)}</div>
+            <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 8 }}>Disponible + ahorro − deudas de tarjeta</div>
           </div>
-          <div style={{ display: 'flex', gap: 32 }}>
-            {[['Disponible', disponible, 'var(--ok)'], ['Ahorro', ahorro, 'var(--accent)'], ['Deudas', Math.abs(deudas), 'var(--danger)']].map(([l, v, c]) => (
-              <div key={l as string}>
-                <div style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', marginBottom: 3 }}>{l as string}</div>
-                <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-ui)', color: c as string }}>{clp(v as number)}</div>
+          <div className="nw-breakdown">
+            {[
+              { label: 'Disponible', val: disponible, dot: 'c-emerald' },
+              { label: 'Ahorro',     val: ahorro,     dot: 'c-violet' },
+              { label: 'Deudas',     val: Math.abs(deudas), dot: 'c-red', red: deudas < 0 },
+            ].map(({ label, val, dot, red }) => (
+              <div key={label} className="nw-item">
+                <div className={`nw-dot ${dot}`} />
+                {label}
+                <b className={red ? 'red' : ''}>{red ? '−' : ''}{clp(val)}</b>
               </div>
             ))}
           </div>
@@ -83,32 +89,25 @@ export default function CuentasPage() {
           const accs = accounts.filter(a => a.type === type)
           if (accs.length === 0) return null
           return (
-            <div key={type}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)', fontFamily: 'var(--font-ui)', marginBottom: 10 }}>{label}</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: 'var(--gap)' }}>
+            <div key={type} className="acc-section">
+              <div className="acc-section-title">{label}</div>
+              <div className="acc-grid">
                 {accs.map(acc => {
                   const color = COLOR_HEX[acc.color] || '#34c98a'
                   const isNeg = acc.balance < 0
                   return (
-                    <div key={acc.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                      <div style={{
-                        width: 44, height: 44, borderRadius: 12, flexShrink: 0,
-                        background: color + '20', border: `1.5px solid ${color}40`,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 20,
-                      }}>
-                        {type === 'Crédito' ? '💳' : type === 'Ahorro' ? '🏦' : '🏧'}
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-ui)', color: 'var(--text)', marginBottom: 2 }}>{acc.name}</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>{acc.bank}</div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-ui)', color: isNeg ? 'var(--danger)' : 'var(--text)' }}>
-                          {isNeg ? '−' : ''}{clp(Math.abs(acc.balance))}
+                    <div key={acc.id} className="card acc-card">
+                      <div className="acc-top">
+                        <div className="acc-ic" style={{ background: color + '20', border: `1.5px solid ${color}40`, fontSize: 18 }}>
+                          {type === 'Crédito' ? '💳' : type === 'Ahorro' ? '🏦' : '🏧'}
                         </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>{type}</div>
                       </div>
+                      <div className="acc-name">{acc.name}</div>
+                      <div className="acc-bank">{acc.bank}</div>
+                      <div className={`acc-balance${isNeg ? ' red' : ''}`}>
+                        {isNeg ? '−' : ''}{clp(Math.abs(acc.balance))}
+                      </div>
+                      <div className="acc-foot">{type}</div>
                     </div>
                   )
                 })}

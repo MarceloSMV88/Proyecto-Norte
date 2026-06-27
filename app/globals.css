@@ -221,7 +221,7 @@ html, body { margin: 0; padding: 0; height: 100%; }
 .bg-red     { background: var(--c-red); }      .bg-slate { background: var(--c-slate); }
 
 /* ---- Progress ---- */
-.progress { width: 100%; background: var(--surface-3); border-radius: 999px; overflow: hidden; position: relative; }
+.progress, .progress-track { width: 100%; height: 6px; background: var(--surface-3); border-radius: 999px; overflow: hidden; position: relative; }
 .progress-fill { height: 100%; border-radius: 999px; transition: width .9s cubic-bezier(.4,0,.1,1); }
 .progress-fill.emerald { background: var(--c-emerald); } .progress-fill.blue { background: var(--c-blue); }
 .progress-fill.violet  { background: var(--c-violet); }  .progress-fill.amber { background: var(--warn); }
@@ -285,7 +285,18 @@ html, body { margin: 0; padding: 0; height: 100%; }
 .up-name i { font-style: normal; font-size: 11px; color: var(--text-faint); font-weight: 500; }
 .up-amt { font-family: var(--font-ui); font-weight: 600; font-size: 14px; }
 
-/* ---- Goals ---- */
+/* ---- Goals (sidebar resumen) ---- */
+.goal-list { display: flex; flex-direction: column; gap: 14px; }
+.goal { display: flex; flex-direction: column; gap: 7px; }
+.goal-top { display: flex; align-items: center; gap: 8px; }
+.goal-dot { width: 8px; height: 8px; border-radius: 3px; flex-shrink: 0; }
+.goal-name { flex: 1; font-size: 13px; font-weight: 600; color: var(--text); font-family: var(--font-ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.goal-pct { font-size: 12px; font-weight: 600; color: var(--text-2); font-family: var(--font-ui); flex-shrink: 0; }
+.goal-bot { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--text-2); gap: 8px; }
+.goal-bot i { font-style: normal; color: var(--text-faint); }
+.goal-due { font-size: 11px; color: var(--text-faint); flex-shrink: 0; }
+
+/* ---- Goals (cards page) ---- */
 .goals-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(320px,1fr)); gap: var(--gap); }
 .goal-card { display: flex; flex-direction: column; gap: 16px; }
 .goal-card-top { display: flex; gap: 18px; align-items: center; }

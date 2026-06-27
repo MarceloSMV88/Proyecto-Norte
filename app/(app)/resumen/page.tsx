@@ -183,35 +183,112 @@ export default function ResumenPage() {
         </section>
 
         {/* ── Stat row ── */}
+        {(() => {
+          const spentPct = s.assignedTotal > 0 ? s.spentTotal / s.assignedTotal : 0
+          const spentTone = s.spentTotal > s.assignedTotal ? 'red' : spentPct > 0.88 ? 'warn' : ''
+          const freeUnassigned = s.unassigned
+          const freeTone = freeUnassigned < 0 ? 'red' : freeUnassigned === 0 ? 'ok' : ''
+          const invertedFlow = dailyFlow.length > 1 ? dailyFlow.map((_, i, a) => a[a.length - 1] - a[i]) : []
+          const savingsFlat = dailyFlow.length > 0 ? dailyFlow.map(() => s.savings) : []
+          return (
         <div className="stat-row">
           {[
-            { label: 'Saldo disponible', value: s.available,   spark: dailyFlow },
-            { label: 'Gastos del mes',   value: s.spentTotal,  tone: 'warn' },
-            { label: 'Ahorro acumulado', value: s.savings,     tone: 'ok' },
-            { label: 'Libre por asignar',value: s.unassigned,  tone: s.unassigned < 0 ? 'red' : 'ok' },
-          ].map(({ label, value, spark, tone }) => (
+            { label: 'Saldo disponible',  value: s.available,   spark: invertedFlow,  sparkColor: 'var(--ok)' },
+            { label: 'Gastos del mes',    value: s.spentTotal,  spark: dailyFlow,      sparkColor: 'var(--warn)', tone: spentTone },
+            { label: 'Ahorro acumulado',  value: s.savings,     spark: savingsFlat,    sparkColor: 'var(--c-violet)', tone: s.savings > 0 ? 'ok' : '' },
+            { label: 'Libre por asignar', value: s.unassigned,  spark: [] as number[], sparkColor: 'var(--c-blue)', tone: freeTone },
+          ].map(({ label, value, spark, sparkColor, tone }) => (
             <div key={label} className="card stat">
               <div className="stat-top">
                 <span className="stat-label">{label}</span>
               </div>
               <div className={`stat-value${tone ? ' ' + tone : ''}`}>{clp(value)}</div>
-              {spark && (
+              {spark && spark.length > 0 && (
                 <div className="stat-spark">
-                  <Spark data={spark} />
+                  <Spark data={spark} color={sparkColor} />
                 </div>
               )}
             </div>
           ))}
         </div>
+          )
+        })()}
 
-        {/* ── 2-col: flujo + lateral ── */}
+        {/* ── 2-col: (flujo + presupuesto) | lateral ── */}
         <div className="grid-2col">
-          {/* Flujo del mes */}
-          <FlowCard dailyFlow={dailyFlow} totalDays={totalDays} s={s} months={months} />
 
-          {/* Lateral */}
+          {/* Columna izquierda */}
+          <div className="col-main">
+            <FlowCard dailyFlow={dailyFlow} totalDays={totalDays} s={s} months={months} />
+
+            {/* Presupuesto por categorías */}
+            <div className="card budget">
+              <div className="card-head">
+                <div>
+                  <h3 className="card-title">Presupuesto por categorías</h3>
+                  <p className="card-sub">Asignado <b>{clp(s.assignedTotal)}</b> · Gastado <b>{clp(s.spentTotal)}</b></p>
+                </div>
+                <div className="tabs sm">
+                  {(['Todas', 'Fijos', 'Variables'] as const).map(f => (
+                    <button key={f} className={catFilter === f ? 'on' : ''} onClick={() => setCatFilter(f)}>{f}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="budget-list">
+                {filteredCats.map(cat => {
+                  const avail = cat.assigned - cat.spent
+                  const over  = avail < 0
+                  const near  = !over && cat.assigned > 0 && (cat.spent / cat.assigned) > 0.88
+                  const state = over ? 'red' : near ? 'amber' : 'ok'
+                  const isOpen = expandedCat === cat.id
+                  const catTxs = transactions.filter(t => t.category_id === cat.id)
+                  return (
+                    <div className={`brow${isOpen ? ' open' : ''}`} key={cat.id}>
+                      <button className="brow-main" onClick={() => setExpandedCat(isOpen ? null : cat.id)}>
+                        <span className={`cat-ic c-${cat.color}`}>{CAT_EMOJI[cat.icon] || '📌'}</span>
+                        <span className="brow-name">
+                          {cat.name}
+                          {cat.fixed && <span className="brow-tag">Fijo</span>}
+                        </span>
+                        <span className="brow-mid">
+                          <div className="progress" style={{ height: 5 }}>
+                            <div className="progress-fill" style={{ width: `${Math.min(100, cat.assigned > 0 ? (cat.spent/cat.assigned)*100 : 0)}%`, background: state === 'red' ? 'var(--danger)' : state === 'amber' ? 'var(--warn)' : 'var(--ok)', height: '100%' }} />
+                          </div>
+                          <span className="brow-nums">{clp(cat.spent)} <i>de {clp(cat.assigned)}</i></span>
+                        </span>
+                        <span className={`brow-avail ${state}`}>
+                          {over ? <><TrendingDown size={13} />{clp(avail)}</> : clp(avail)}
+                          <i>{over ? 'excedido' : 'disponible'}</i>
+                        </span>
+                        <span className={`brow-chev${isOpen ? ' rot' : ''}`}>▾</span>
+                      </button>
+                      {isOpen && (
+                        <div className="brow-detail">
+                          <div className="detail-txns">
+                            {catTxs.length ? catTxs.slice(0, 4).map(t => (
+                              <div className="dtx" key={t.id}>
+                                <span className="dtx-name">{t.name}</span>
+                                <span className="dtx-date">{t.date}</span>
+                                <span className="dtx-amt">{clp(Math.abs(t.amount))}</span>
+                              </div>
+                            )) : <span className="dtx-empty">Sin movimientos este mes</span>}
+                          </div>
+                          {over && (
+                            <div className="detail-actions">
+                              <span className="detail-alert">⚠ Esta categoría superó su límite por {clp(Math.abs(avail))}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Columna lateral */}
           <div className="col-side">
-            {/* Donut */}
             {donutSegs.length > 0 && (
               <div className="card donut-card">
                 <div className="card-head">
@@ -253,7 +330,6 @@ export default function ResumenPage() {
               </div>
             )}
 
-            {/* Próximos vencimientos */}
             {upcoming.length > 0 && (
               <div className="card upcoming">
                 <div className="card-head">
@@ -279,7 +355,6 @@ export default function ResumenPage() {
               </div>
             )}
 
-            {/* Metas */}
             {goals.length > 0 && (
               <div className="card goals">
                 <div className="card-head">
@@ -311,72 +386,6 @@ export default function ResumenPage() {
                 </div>
               </div>
             )}
-          </div>
-        </div>
-
-        {/* ── Presupuesto por categorías ── */}
-        <div className="card budget">
-          <div className="card-head">
-            <div>
-              <h3 className="card-title">Presupuesto por categorías</h3>
-              <p className="card-sub">Asignado <b>{clp(s.assignedTotal)}</b> · Gastado <b>{clp(s.spentTotal)}</b></p>
-            </div>
-            <div className="tabs sm">
-              {(['Todas', 'Fijos', 'Variables'] as const).map(f => (
-                <button key={f} className={catFilter === f ? 'on' : ''} onClick={() => setCatFilter(f)}>{f}</button>
-              ))}
-            </div>
-          </div>
-          <div className="budget-list">
-            {filteredCats.map(cat => {
-              const avail = cat.assigned - cat.spent
-              const over  = avail < 0
-              const near  = !over && cat.assigned > 0 && (cat.spent / cat.assigned) > 0.88
-              const state = over ? 'red' : near ? 'amber' : 'ok'
-              const isOpen = expandedCat === cat.id
-              const catTxs = transactions.filter(t => t.category_id === cat.id)
-
-              return (
-                <div className={`brow${isOpen ? ' open' : ''}`} key={cat.id}>
-                  <button className="brow-main" onClick={() => setExpandedCat(isOpen ? null : cat.id)}>
-                    <span className={`cat-ic c-${cat.color}`}>{CAT_EMOJI[cat.icon] || '📌'}</span>
-                    <span className="brow-name">
-                      {cat.name}
-                      {cat.fixed && <span className="brow-tag">Fijo</span>}
-                    </span>
-                    <span className="brow-mid">
-                      <div className="progress" style={{ height: 5 }}>
-                        <div className="progress-fill" style={{ width: `${Math.min(100, cat.assigned > 0 ? (cat.spent/cat.assigned)*100 : 0)}%`, background: state === 'red' ? 'var(--danger)' : state === 'amber' ? 'var(--warn)' : 'var(--ok)', height: '100%' }} />
-                      </div>
-                      <span className="brow-nums">{clp(cat.spent)} <i>de {clp(cat.assigned)}</i></span>
-                    </span>
-                    <span className={`brow-avail ${state}`}>
-                      {over ? <><TrendingDown size={13} />{clp(avail)}</> : clp(avail)}
-                      <i>{over ? 'excedido' : 'disponible'}</i>
-                    </span>
-                    <span className={`brow-chev${isOpen ? ' rot' : ''}`}>▾</span>
-                  </button>
-                  {isOpen && (
-                    <div className="brow-detail">
-                      <div className="detail-txns">
-                        {catTxs.length ? catTxs.slice(0, 4).map(t => (
-                          <div className="dtx" key={t.id}>
-                            <span className="dtx-name">{t.name}</span>
-                            <span className="dtx-date">{t.date}</span>
-                            <span className="dtx-amt">{clp(Math.abs(t.amount))}</span>
-                          </div>
-                        )) : <span className="dtx-empty">Sin movimientos este mes</span>}
-                      </div>
-                      {over && (
-                        <div className="detail-actions">
-                          <span className="detail-alert">⚠ Esta categoría superó su límite por {clp(Math.abs(avail))}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
           </div>
         </div>
 
@@ -440,21 +449,24 @@ function FlowCard({ dailyFlow, totalDays, s, months }: {
   )
 }
 
-function Spark({ data }: { data: number[] }) {
+function Spark({ data, color = 'var(--accent)' }: { data: number[]; color?: string }) {
   if (!data.length) return null
   const max = Math.max(...data, 1)
+  const min = Math.min(...data, 0)
+  const range = max - min || 1
   const h = 30, w = 80
-  const pts = data.map((v, i) => `${(i / Math.max(data.length - 1, 1)) * w},${h - (v / max) * h}`).join(' ')
+  const pts = data.map((v, i) => `${(i / Math.max(data.length - 1, 1)) * w},${h - ((v - min) / range) * (h - 4) - 2}`).join(' ')
+  const gradId = `sg_${color.replace(/[^a-z0-9]/gi, '')}`
   return (
     <svg width={w} height={h} style={{ width: '100%', height: '100%', display: 'block' }}>
       <defs>
-        <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--accent)" stopOpacity=".3" />
-          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity=".25" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
       </defs>
-      <polygon points={`0,${h} ${pts} ${w},${h}`} fill="url(#sg)" />
-      <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <polygon points={`0,${h} ${pts} ${w},${h}`} fill={`url(#${gradId})`} />
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

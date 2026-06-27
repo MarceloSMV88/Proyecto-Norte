@@ -79,27 +79,29 @@ export default function Sidebar() {
           <span>Ajustes</span>
         </Link>
 
-        {/* Active user */}
+        {/* Active user + sign out */}
         {activeProfile && (
-          <div className="user-row">
-            <div className={`avatar ${AV_CLASS[activeProfile.color] || 'av-emerald'}`}>
-              {activeProfile.initials}
+          <div className="user-row" style={{ justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+              <div className={`avatar ${AV_CLASS[activeProfile.color] || 'av-emerald'}`}>
+                {activeProfile.initials}
+              </div>
+              <div className="user-meta">
+                <span className="user-name">{activeProfile.name}</span>
+                <span className="user-sub">{activeProfile.role}</span>
+              </div>
             </div>
-            <div className="user-meta">
-              <span className="user-name">{activeProfile.name}</span>
-              <span className="user-sub">{activeProfile.role}</span>
-            </div>
+            <button
+              onClick={signOut}
+              title="Cerrar sesión"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', padding: 6, display: 'flex', alignItems: 'center', borderRadius: 8, transition: 'color .15s' }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-faint)')}
+            >
+              <LogOut size={16} />
+            </button>
           </div>
         )}
-
-        <button
-          onClick={signOut}
-          className="nav-item"
-          style={{ color: 'var(--text-faint)', marginTop: 2 }}
-        >
-          <LogOut size={19} />
-          <span>Salir</span>
-        </button>
       </div>
     </aside>
   )

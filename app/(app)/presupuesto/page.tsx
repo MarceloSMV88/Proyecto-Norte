@@ -58,10 +58,10 @@ export default function PresupuestoPage() {
               {clp(unassigned)}
             </div>
           </div>
-          <div style={{ minWidth: 200 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)' }}>
-              <span>Ingreso {clp(summary.income)}</span>
-              <span>Asignado {clp(summary.assignedTotal)}</span>
+          <div style={{ flex: 1, maxWidth: 340 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 6, fontSize: 12, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)' }}>
+              <span>Ingreso <b style={{ color: 'var(--text)' }}>{clp(summary.income)}</b></span>
+              <span>Asignado <b style={{ color: 'var(--text)' }}>{clp(summary.assignedTotal)}</b></span>
             </div>
             <div className="progress-track" style={{ height: 8 }}>
               <div className="progress-fill" style={{
@@ -73,12 +73,18 @@ export default function PresupuestoPage() {
         </div>
 
         {/* Mini stats */}
+        {(() => {
+          const spentPct = summary.assignedTotal > 0 ? summary.spentTotal / summary.assignedTotal : 0
+          const dispTotal = summary.assignedTotal - summary.spentTotal
+          const spentColor = summary.spentTotal > summary.assignedTotal ? 'var(--danger)' : spentPct > 0.88 ? 'var(--warn)' : 'var(--text)'
+          const dispColor  = dispTotal < 0 ? 'var(--danger)' : spentPct > 0.88 ? 'var(--warn)' : 'var(--ok)'
+          return (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 'var(--gap)' }}>
           {[
             ['Ingreso', summary.income, 'var(--text)'],
             ['Asignado', summary.assignedTotal, 'var(--text-2)'],
-            ['Gastado', summary.spentTotal, 'var(--danger)'],
-            ['Disponible total', summary.assignedTotal - summary.spentTotal, 'var(--ok)'],
+            ['Gastado', summary.spentTotal, spentColor],
+            ['Disponible total', dispTotal, dispColor],
           ].map(([l, v, c]) => (
             <div key={l as string} className="card" style={{ padding: 16 }}>
               <div style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.5px' }}>{l as string}</div>
@@ -86,6 +92,8 @@ export default function PresupuestoPage() {
             </div>
           ))}
         </div>
+          )
+        })()}
 
         {/* Groups */}
         {GROUPS.map(group => {
@@ -101,7 +109,7 @@ export default function PresupuestoPage() {
                 <div style={{ display: 'flex', gap: 20, fontSize: 12, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)' }}>
                   <span>Asignado {clp(subtotalAssigned)}</span>
                   <span>Gastado {clp(subtotalSpent)}</span>
-                  <span style={{ color: subtotalAssigned - subtotalSpent < 0 ? 'var(--danger)' : 'var(--ok)' }}>
+                  <span style={{ color: subtotalAssigned - subtotalSpent < 0 ? 'var(--danger)' : subtotalAssigned > 0 && subtotalSpent / subtotalAssigned > 0.88 ? 'var(--warn)' : 'var(--ok)' }}>
                     Disp. {clp(subtotalAssigned - subtotalSpent)}
                   </span>
                 </div>
@@ -160,7 +168,7 @@ export default function PresupuestoPage() {
                         <div style={{ fontSize: 11, color: status }}>{clp(cat.spent)}</div>
                       </div>
 
-                      <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-ui)', color: disp < 0 ? 'var(--danger)' : 'var(--ok)' }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-ui)', color: status }}>
                         {clp(disp)}
                       </span>
 

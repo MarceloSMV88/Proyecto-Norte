@@ -31,7 +31,12 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (profile) {
-      setActiveProfileState(prev => prev ?? profile)
+      setActiveProfileState(prev => {
+        if (!prev) return profile
+        // Sync fresh auth profile data when it's the same person
+        if (prev.id === profile.id) return profile
+        return prev
+      })
       loadProfiles()
     }
   }, [profile, loadProfiles])

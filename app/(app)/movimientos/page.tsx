@@ -64,7 +64,7 @@ export default function MovimientosPage() {
 
         {/* Stats */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 'var(--gap)' }}>
-          {[['Ingresos', income, 'var(--ok)'], ['Gastos', expense, 'var(--danger)'], ['Balance', income - expense, income - expense >= 0 ? 'var(--ok)' : 'var(--danger)']].map(([l, v, c]) => (
+          {[['Ingresos', income, 'var(--ok)'], ['Gastos', expense, 'var(--warn)'], ['Balance', income - expense, income - expense >= 0 ? 'var(--ok)' : 'var(--danger)']].map(([l, v, c]) => (
             <div key={l as string} className="card" style={{ padding: 16 }}>
               <div style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>{l as string}</div>
               <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'var(--font-ui)', color: c as string }}>{clp(v as number)}</div>
@@ -83,7 +83,7 @@ export default function MovimientosPage() {
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             {(['Todos', 'Gastos', 'Ingresos', 'Recurrentes'] as TxFilter[]).map(f => (
-              <button key={f} onClick={() => setFilter(f)} className={`chip${filter === f ? ' active' : ''}`}>{f}</button>
+              <button key={f} onClick={() => setFilter(f)} className={`chip${filter === f ? ' on' : ''}`}>{f}</button>
             ))}
           </div>
         </div>
@@ -101,7 +101,7 @@ export default function MovimientosPage() {
               <div key={date}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 20px 6px', background: 'var(--surface-2)', borderBottom: '1px solid var(--hairline)' }}>
                   <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>{formatDate(date)}</span>
-                  {dayTotal > 0 && <span style={{ fontSize: 12, color: 'var(--danger)', fontFamily: 'var(--font-ui)' }}>−{clp(dayTotal)}</span>}
+                  {dayTotal > 0 && <span style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>−{clp(dayTotal)}</span>}
                 </div>
                 {txs.map((tx, i) => {
                   const isIncome = tx.amount > 0

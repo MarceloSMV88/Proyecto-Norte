@@ -1,42 +1,47 @@
-﻿'use client'
+'use client'
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { X, Flag } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
 import type { AccentColor } from '@/lib/types'
 
-const COLORS: AccentColor[] = ['emerald', 'blue', 'violet', 'amber', 'red']
-const COLOR_HEX: Record<AccentColor, string> = {
-  emerald: '#34c98a', blue: '#4f93f5', violet: '#9b8cf0', amber: '#e6b25a', red: '#ef7a63',
-}
+const COLORS: { key: AccentColor; hex: string; label: string }[] = [
+  { key: 'emerald', hex: '#34c98a', label: 'Verde' },
+  { key: 'blue',    hex: '#4f93f5', label: 'Azul' },
+  { key: 'violet',  hex: '#9b8cf0', label: 'Violeta' },
+  { key: 'amber',   hex: '#e6b25a', label: 'Ámbar' },
+  { key: 'red',     hex: '#ef7a63', label: 'Rojo' },
+]
 
 export default function GoalModal({ profileId, onClose, onSaved }: {
   profileId: string; onClose: () => void; onSaved: () => void
 }) {
-  const [name, setName] = useState('')
-  const [target, setTarget] = useState('')
+  const [name, setName]       = useState('')
+  const [target, setTarget]   = useState('')
   const [monthly, setMonthly] = useState('')
-  const [due, setDue] = useState('')
-  const [color, setColor] = useState<AccentColor>('emerald')
-  const [saving, setSaving] = useState(false)
+  const [due, setDue]         = useState('')
+  const [color, setColor]     = useState<AccentColor>('violet')
+  const [saving, setSaving]   = useState(false)
   const { showToast } = useToast()
   const supabase = createClient()
 
+  const selectedColor = COLORS.find(c => c.key === color)!
+  const n = parseInt(target.replace(/\D/g, '')) || 0
+  const formattedTarget = n > 0 ? n.toLocaleString('es-CL') : ''
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!name || !target) return
+    if (!name || !n) return
     setSaving(true)
-
     const { error } = await supabase.from('goals').insert({
       profile_id: profileId,
-      name,
-      target: Math.round(parseFloat(target.replace(/\./g, '').replace(',', '.'))),
+      name: name.trim(),
+      target: n,
       current: 0,
-      monthly: monthly ? Math.round(parseFloat(monthly.replace(/\./g, '').replace(',', '.'))) : 0,
-      due: due || null,
+      monthly: parseInt(monthly.replace(/\D/g, '')) || 0,
+      due: due.trim() || null,
       color,
     })
-
     setSaving(false)
     if (error) { showToast('Error al guardar'); return }
     showToast('✓ Meta creada')
@@ -45,64 +50,96 @@ export default function GoalModal({ profileId, onClose, onSaved }: {
 
   return (
     <div className="modal-scrim" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={{ borderTop: '3px solid var(--c-violet)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <h2 style={{ fontFamily: 'var(--font-ui)', fontSize: 17, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
-            Crear nueva meta
-          </h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 4 }}>
-            <X size={18} />
+      <div className="modal" style={{ borderTop: `3px solid ${selectedColor.hex}` }}>
+        <div className="modal-head">
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Flag size={17} style={{ color: selectedColor.hex }} />
+            Nueva meta
+          </h3>
+          <button type="button" onClick={onClose} className="icon-btn ghost sm">
+            <X size={16} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <form onSubmit={handleSubmit}>
+          {/* Nombre */}
+          <label className="field-label">Nombre</label>
           <input
-            type="text" placeholder="Nombre de la meta"
-            value={name} onChange={e => setName(e.target.value)}
-            autoFocus style={{ padding: '10px 14px', fontSize: 14, outline: 'none' }}
-          />
-          <input
-            type="text" inputMode="numeric" placeholder="Objetivo ($)"
-            value={target} onChange={e => setTarget(e.target.value.replace(/[^0-9]/g, ''))}
-            style={{ padding: '10px 14px', fontSize: 14, outline: 'none' }}
-          />
-          <input
-            type="text" inputMode="numeric" placeholder="Aporte mensual ($) — opcional"
-            value={monthly} onChange={e => setMonthly(e.target.value.replace(/[^0-9]/g, ''))}
-            style={{ padding: '10px 14px', fontSize: 14, outline: 'none' }}
-          />
-          <input
-            type="text" placeholder="Fecha límite (ej: Dic 2026) — opcional"
-            value={due} onChange={e => setDue(e.target.value)}
-            style={{ padding: '10px 14px', fontSize: 14, outline: 'none' }}
+            className="text-input"
+            type="text"
+            placeholder="Ej: Fondo de emergencia, Vacaciones…"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            autoFocus
+            maxLength={60}
           />
 
-          <div>
-            <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 8, fontFamily: 'var(--font-ui)' }}>Color</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {COLORS.map(c => (
-                <button key={c} type="button" onClick={() => setColor(c)}
-                  style={{
-                    width: 28, height: 28, borderRadius: '50%',
-                    background: COLOR_HEX[c], border: color === c ? `3px solid var(--text)` : '3px solid transparent',
-                    cursor: 'pointer', transition: 'border .15s',
-                  }}
-                />
-              ))}
+          {/* Objetivo */}
+          <label className="field-label" style={{ marginTop: 16 }}>Objetivo ($)</label>
+          <div className="amount-field">
+            <span className="amount-cur">$</span>
+            <input
+              className="amount-input"
+              type="text"
+              inputMode="numeric"
+              placeholder="0"
+              value={formattedTarget}
+              onChange={e => setTarget(e.target.value.replace(/\D/g, ''))}
+            />
+          </div>
+
+          {/* Aporte mensual + Fecha */}
+          <div className="row-2" style={{ marginTop: 4 }}>
+            <div>
+              <label className="field-label">Aporte mensual ($)</label>
+              <input
+                className="text-input"
+                type="text"
+                inputMode="numeric"
+                placeholder="Opcional"
+                value={monthly}
+                onChange={e => setMonthly(e.target.value.replace(/\D/g, ''))}
+              />
+            </div>
+            <div>
+              <label className="field-label">Fecha límite</label>
+              <input
+                className="text-input"
+                type="text"
+                placeholder="Ej: Dic 2026"
+                value={due}
+                onChange={e => setDue(e.target.value)}
+              />
             </div>
           </div>
 
+          {/* Color */}
+          <label className="field-label" style={{ marginTop: 16 }}>Color</label>
+          <div style={{ display: 'flex', gap: 10 }}>
+            {COLORS.map(c => (
+              <button
+                key={c.key}
+                type="button"
+                onClick={() => setColor(c.key)}
+                title={c.label}
+                style={{
+                  width: 30, height: 30, borderRadius: '50%',
+                  background: c.hex,
+                  border: color === c.key ? `3px solid var(--text)` : '3px solid transparent',
+                  cursor: 'pointer', transition: 'border .15s, transform .1s',
+                  transform: color === c.key ? 'scale(1.15)' : 'scale(1)',
+                }}
+              />
+            ))}
+          </div>
+
           <button
-            type="submit" disabled={!name || !target || saving}
-            style={{
-              padding: '12px', borderRadius: 'var(--radius-sm)',
-              background: 'var(--c-violet)', color: 'white',
-              fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 15,
-              border: 'none', cursor: saving ? 'wait' : 'pointer',
-              opacity: !name || !target ? 0.5 : 1, marginTop: 4,
-            }}
+            type="submit"
+            disabled={!name || !n || saving}
+            className="btn-primary block"
+            style={{ background: selectedColor.hex, opacity: name && n ? 1 : 0.4 }}
           >
-            {saving ? 'Guardando...' : 'Crear meta'}
+            {saving ? 'Guardando…' : 'Crear meta'}
           </button>
         </form>
       </div>
