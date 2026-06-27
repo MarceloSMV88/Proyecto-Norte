@@ -41,9 +41,9 @@ export default function TransactionModal({ type, profileId, categories, accounts
   const formatted = n > 0 ? n.toLocaleString('es-CL') : ''
   const selectedCat = categories.find(c => c.id === categoryId)
 
-  const relevantCats = type === 'mover'
-    ? []
-    : categories.filter(c => type === 'ingreso' ? c.group_name === 'Ahorro' : c.group_name !== 'Ahorro')
+  const relevantCats = type === 'gasto'
+    ? categories.filter(c => c.group_name !== 'Ahorro')
+    : []
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -52,7 +52,7 @@ export default function TransactionModal({ type, profileId, categories, accounts
 
     const { error } = await supabase.from('transactions').insert({
       profile_id: profileId,
-      name: selectedCat?.name ?? cfg.title,
+      name: selectedCat?.name || description.trim() || (type === 'ingreso' ? 'Ingreso' : cfg.title),
       description: description.trim() || null,
       amount: type === 'ingreso' ? n : -n,
       type: (type === 'mover' ? 'transfer' : type) as TransactionType,
