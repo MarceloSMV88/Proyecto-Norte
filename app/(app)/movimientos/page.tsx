@@ -26,7 +26,8 @@ export default function MovimientosPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [filter, setFilter] = useState<TxFilter>('Todos')
   const [search, setSearch] = useState('')
-  const [dateFilter, setDateFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [modal, setModal] = useState<'gasto' | 'ingreso' | null>(null)
 
   const load = useCallback(async () => {
@@ -53,7 +54,9 @@ export default function MovimientosPage() {
     if (filter === 'Gastos' && tx.type !== 'gasto') return false
     if (filter === 'Ingresos' && tx.type !== 'ingreso') return false
     if (filter === 'Recurrentes' && !tx.recurring) return false
-    if (dateFilter && tx.date.slice(0, 10) !== dateFilter) return false
+    const d = tx.date.slice(0, 10)
+    if (dateFrom && d < dateFrom) return false
+    if (dateTo && d > dateTo) return false
     if (search && !tx.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
@@ -71,7 +74,7 @@ export default function MovimientosPage() {
 
   return (
     <div>
-      <Topbar title="Movimientos" month={selectedMonth} onMonthChange={m => { setSelectedMonth(m); setFilter('Todos'); setSearch(''); setDateFilter('') }} action={{ label: 'Agregar', onClick: () => setModal('gasto') }} />
+      <Topbar title="Movimientos" month={selectedMonth} onMonthChange={m => { setSelectedMonth(m); setFilter('Todos'); setSearch(''); setDateFrom(''); setDateTo('') }} action={{ label: 'Agregar', onClick: () => setModal('gasto') }} />
 
       <div className="scroll">
 
@@ -95,8 +98,8 @@ export default function MovimientosPage() {
               style={{ paddingLeft: 34 }}
             />
           </div>
-          <div style={{ width: 170 }}>
-            <DatePicker value={dateFilter} onChange={setDateFilter} placeholder="Cualquier día" clearable dropUp={false} />
+          <div style={{ width: 210 }}>
+            <DatePicker range from={dateFrom} to={dateTo} onRangeChange={(f, t) => { setDateFrom(f); setDateTo(t) }} placeholder="Rango de fechas" clearable dropUp={false} />
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             {(['Todos', 'Gastos', 'Ingresos', 'Recurrentes'] as TxFilter[]).map(f => (

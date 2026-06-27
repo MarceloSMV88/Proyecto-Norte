@@ -13,13 +13,14 @@ export function clpShort(n: number): string {
 }
 
 export function formatDate(dateStr: string): string {
-  const d = new Date(dateStr)
-  const today = new Date()
-  const yesterday = new Date(today)
-  yesterday.setDate(today.getDate() - 1)
+  // Parse at local noon to avoid UTC-midnight shifting the date a day back
+  const d = new Date(dateStr.slice(0, 10) + 'T12:00:00')
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const yesterdayIso = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  const iso = dateStr.slice(0, 10)
 
-  if (d.toDateString() === today.toDateString()) return 'Hoy'
-  if (d.toDateString() === yesterday.toDateString()) return 'Ayer'
+  if (iso === todayIso) return 'Hoy'
+  if (iso === yesterdayIso) return 'Ayer'
   return d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })
 }
 
