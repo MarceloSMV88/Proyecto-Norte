@@ -7,6 +7,7 @@ import Topbar from '@/components/layout/Topbar'
 import TransactionModal from '@/components/modals/TransactionModal'
 import DatePicker from '@/components/ui/DatePicker'
 import { clp, formatDate } from '@/lib/utils'
+import { catEmoji } from '@/lib/icons'
 import type { Transaction, Category, Account } from '@/lib/types'
 
 type TxFilter = 'Todos' | 'Gastos' | 'Ingresos' | 'Recurrentes'
@@ -131,7 +132,7 @@ export default function MovimientosPage() {
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                     >
                       <div style={{ width: 32, height: 32, borderRadius: 9, background: 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>
-                        {tx.categories?.icon === 'cart' ? '🛒' : tx.categories?.icon === 'car' ? '🚗' : tx.categories?.icon === 'utensils' ? '🍽️' : tx.categories?.icon === 'heart' ? '❤️' : tx.categories?.icon === 'film' ? '🎬' : tx.categories?.icon === 'bag' ? '👜' : tx.categories?.icon === 'zap' ? '⚡' : tx.categories?.icon === 'repeat' ? '🔄' : tx.categories?.icon === 'home' ? '🏠' : tx.categories?.icon === 'target' ? '🎯' : isIncome ? '💰' : tx.type === 'transfer' ? '↔️' : '💳'}
+                        {tx.categories?.icon ? catEmoji(tx.categories.icon) : isIncome ? '💰' : tx.type === 'transfer' ? '↔️' : '💳'}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

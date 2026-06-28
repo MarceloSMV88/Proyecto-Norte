@@ -4,6 +4,7 @@ import { X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
 import DatePicker from '@/components/ui/DatePicker'
+import { catEmoji } from '@/lib/icons'
 import type { TransactionType, Category, Account } from '@/lib/types'
 
 type ModalType = 'gasto' | 'ingreso' | 'mover'
@@ -12,11 +13,6 @@ const CONFIG: Record<ModalType, { title: string; btnLabel: string }> = {
   gasto:  { title: 'Agregar gasto',    btnLabel: 'Registrar gasto' },
   ingreso:{ title: 'Agregar ingreso',  btnLabel: 'Registrar ingreso' },
   mover:  { title: 'Mover dinero',     btnLabel: 'Registrar transferencia' },
-}
-
-const CAT_EMOJI: Record<string, string> = {
-  home: '🏠', cart: '🛒', car: '🚗', zap: '⚡', heart: '❤️',
-  film: '🎬', bag: '👜', target: '🎯', repeat: '🔄', utensils: '🍽️',
 }
 
 export default function TransactionModal({ type, profileId, categories, accounts, onClose, onSaved }: {
@@ -105,7 +101,7 @@ export default function TransactionModal({ type, profileId, categories, accounts
                     className={`chip${categoryId === c.id ? ' on' : ''}`}
                     onClick={() => setCategoryId(categoryId === c.id ? '' : c.id)}
                   >
-                    <span className={`chip-ic c-${c.color}`}>{CAT_EMOJI[c.icon] || '📌'}</span>
+                    <span className={`chip-ic c-${c.color}`}>{catEmoji(c.icon)}</span>
                     {c.name}
                   </button>
                 ))}

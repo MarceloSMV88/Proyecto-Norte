@@ -102,12 +102,13 @@ export default function MetasPage() {
                 {contributing === g.id ? (
                   <div style={{ display: 'flex', gap: 6 }}>
                     <input
+                      className="text-input"
                       type="text" inputMode="numeric" autoFocus
                       placeholder="Monto ($)"
-                      value={contributeVal}
+                      value={contributeVal ? parseInt(contributeVal).toLocaleString('es-CL') : ''}
                       onChange={e => setContributeVal(e.target.value.replace(/[^0-9]/g, ''))}
                       onKeyDown={e => { if (e.key === 'Enter') contribute(g); if (e.key === 'Escape') setContributing(null) }}
-                      style={{ flex: 1, padding: '8px 12px', fontSize: 13, outline: 'none' }}
+                      style={{ flex: 1, padding: '8px 12px', fontSize: 13 }}
                     />
                     <button onClick={() => contribute(g)}
                       style={{ padding: '8px 14px', borderRadius: 'var(--radius-sm)', background: color, color: '#06140e', border: 'none', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>

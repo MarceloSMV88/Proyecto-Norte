@@ -131,8 +131,8 @@ export default function CuentasPage() {
             <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Nueva cuenta</div>
             <form onSubmit={addAccount} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <input type="text" placeholder="Nombre (ej: Cuenta Corriente)" required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={{ padding: '10px 14px', fontSize: 13.5, outline: 'none' }} />
-                <input type="text" placeholder="Banco" value={form.bank} onChange={e => setForm(f => ({ ...f, bank: e.target.value }))} style={{ padding: '10px 14px', fontSize: 13.5, outline: 'none' }} />
+                <input className="text-input" type="text" placeholder="Nombre (ej: Cuenta Corriente)" required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+                <input className="text-input" type="text" placeholder="Banco" value={form.bank} onChange={e => setForm(f => ({ ...f, bank: e.target.value }))} />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as AccountType }))} style={{ padding: '10px 14px', fontSize: 13.5, outline: 'none', cursor: 'pointer' }}>
@@ -140,7 +140,7 @@ export default function CuentasPage() {
                   <option value="Ahorro">Ahorro / inversión</option>
                   <option value="Crédito">Tarjeta de crédito</option>
                 </select>
-                <input type="text" inputMode="numeric" placeholder="Saldo actual ($)" value={form.balance} onChange={e => setForm(f => ({ ...f, balance: e.target.value.replace(/[^0-9-]/g, '') }))} style={{ padding: '10px 14px', fontSize: 13.5, outline: 'none' }} />
+                <input className="text-input" type="text" inputMode="numeric" placeholder="Saldo actual ($)" value={form.balance} onChange={e => setForm(f => ({ ...f, balance: e.target.value.replace(/[^0-9-]/g, '') }))} />
               </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button type="button" onClick={() => setAdding(false)} style={{ padding: '9px 18px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-2)', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13.5, cursor: 'pointer' }}>Cancelar</button>

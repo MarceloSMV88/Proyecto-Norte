@@ -6,16 +6,12 @@ import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
 import BarPairs from '@/components/charts/BarPairs'
 import { clp, clpShort, computeSummary, getDaysLeftInMonth } from '@/lib/utils'
+import { catEmoji } from '@/lib/icons'
 import type { Category, Account, Goal, Transaction, Upcoming, MonthlyBar } from '@/lib/types'
 import TransactionModal from '@/components/modals/TransactionModal'
 import GoalModal from '@/components/modals/GoalModal'
 
 type ModalType = 'gasto' | 'ingreso' | 'mover' | 'meta' | null
-
-const CAT_EMOJI: Record<string, string> = {
-  home: '🏠', cart: '🛒', car: '🚗', zap: '⚡', heart: '❤️',
-  film: '🎬', bag: '👜', target: '🎯', repeat: '🔄', utensils: '🍽️',
-}
 
 const COLOR_HEX: Record<string, string> = {
   emerald: '#34c98a', blue: '#4f93f5', violet: '#9b8cf0', amber: '#e6b25a', red: '#ef7a63', slate: '#7c8893',
@@ -256,7 +252,7 @@ export default function ResumenPage() {
                   return (
                     <div className={`brow${isOpen ? ' open' : ''}`} key={cat.id}>
                       <button className="brow-main" onClick={() => setExpandedCat(isOpen ? null : cat.id)}>
-                        <span className={`cat-ic c-${cat.color}`}>{CAT_EMOJI[cat.icon] || '📌'}</span>
+                        <span className={`cat-ic c-${cat.color}`}>{catEmoji(cat.icon)}</span>
                         <span className="brow-name">
                           {cat.name}
                           {cat.fixed && <span className="brow-tag">Fijo</span>}

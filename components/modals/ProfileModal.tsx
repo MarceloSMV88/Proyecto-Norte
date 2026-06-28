@@ -74,19 +74,20 @@ export default function ProfileModal({ createdBy, onClose, onSaved }: {
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <input
+            className="text-input"
             type="text" placeholder="Nombre completo"
             value={fullName} onChange={e => setFullName(e.target.value)}
-            autoFocus style={{ padding: '10px 14px', fontSize: 14, outline: 'none' }}
+            autoFocus
           />
           <input
+            className="text-input"
             type="email" placeholder="Email (opcional, para vincular login Google)"
             value={email} onChange={e => setEmail(e.target.value)}
-            style={{ padding: '10px 14px', fontSize: 14, outline: 'none' }}
           />
           <input
+            className="text-input"
             type="text" inputMode="numeric" placeholder="Ingreso mensual (CLP)"
-            value={income} onChange={e => setIncome(e.target.value.replace(/[^0-9]/g, ''))}
-            style={{ padding: '10px 14px', fontSize: 14, outline: 'none' }}
+            value={income ? parseInt(income).toLocaleString('es-CL') : ''} onChange={e => setIncome(e.target.value.replace(/[^0-9]/g, ''))}
           />
 
           <div style={{ display: 'flex', gap: 8 }}>
