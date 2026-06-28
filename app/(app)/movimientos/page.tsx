@@ -79,7 +79,7 @@ export default function MovimientosPage() {
       <div className="scroll">
 
         {/* Stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 'var(--gap)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 'var(--gap)', width: '100%', maxWidth: 1152, margin: '0 auto' }}>
           {[['Ingresos', income, 'var(--ok)'], ['Gastos', expense, 'var(--warn)'], ['Balance', income - expense, income - expense >= 0 ? 'var(--ok)' : 'var(--danger)']].map(([l, v, c]) => (
             <div key={l as string} className="card" style={{ padding: 16 }}>
               <div style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>{l as string}</div>
@@ -89,7 +89,7 @@ export default function MovimientosPage() {
         </div>
 
         {/* Filters */}
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', width: '100%', maxWidth: 1152, margin: '0 auto' }}>
           <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
             <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-faint)', zIndex: 1 }} />
             <input
@@ -109,7 +109,7 @@ export default function MovimientosPage() {
         </div>
 
         {/* Transaction list */}
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="card" style={{ padding: 0, overflow: 'hidden', width: '100%', maxWidth: 1152, margin: '0 auto' }}>
           {Object.entries(grouped).length === 0 && (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-faint)', fontSize: 14 }}>
               Sin movimientos para mostrar
@@ -126,11 +126,11 @@ export default function MovimientosPage() {
                 {txs.map((tx, i) => {
                   const isIncome = tx.amount > 0
                   return (
-                    <div key={tx.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', borderBottom: i < txs.length - 1 ? '1px solid var(--hairline)' : 'none', transition: 'background .15s', cursor: 'default' }}
+                    <div key={tx.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', borderBottom: i < txs.length - 1 ? '1px solid var(--hairline)' : 'none', transition: 'background .15s', cursor: 'default' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                     >
-                      <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 9, background: 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>
                         {tx.categories?.icon === 'cart' ? '🛒' : tx.categories?.icon === 'car' ? '🚗' : tx.categories?.icon === 'utensils' ? '🍽️' : tx.categories?.icon === 'heart' ? '❤️' : tx.categories?.icon === 'film' ? '🎬' : tx.categories?.icon === 'bag' ? '👜' : tx.categories?.icon === 'zap' ? '⚡' : tx.categories?.icon === 'repeat' ? '🔄' : tx.categories?.icon === 'home' ? '🏠' : tx.categories?.icon === 'target' ? '🎯' : isIncome ? '💰' : tx.type === 'transfer' ? '↔️' : '💳'}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
