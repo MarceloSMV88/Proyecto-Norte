@@ -1,12 +1,12 @@
-﻿'use client'
+'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { Plus } from 'lucide-react'
+import { Pencil } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
+import AccountModal from '@/components/modals/AccountModal'
 import { clp } from '@/lib/utils'
 import type { Account, AccountType } from '@/lib/types'
-import { useToast } from '@/components/ui/Toast'
 
 const ACCOUNT_GROUPS: { type: AccountType; label: string }[] = [
   { type: 'Cuenta', label: 'Cuentas' },
@@ -21,11 +21,9 @@ const COLOR_HEX: Record<string, string> = {
 export default function CuentasPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
-  const { showToast } = useToast()
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7) + '-01')
   const [accounts, setAccounts] = useState<Account[]>([])
   const [adding, setAdding] = useState(false)
-  const [form, setForm] = useState({ name: '', bank: '', type: 'Cuenta' as AccountType, balance: '', color: 'emerald' })
+  const [editAcc, setEditAcc] = useState<Account | null>(null)
 
   const load = useCallback(async () => {
     if (!activeProfile) return
@@ -39,27 +37,13 @@ export default function CuentasPage() {
 
   const disponible = accounts.filter(a => a.type === 'Cuenta').reduce((s, a) => s + a.balance, 0)
   const ahorro = accounts.filter(a => a.type === 'Ahorro').reduce((s, a) => s + a.balance, 0)
+  // balance de Crédito es negativo (deuda); deudas = suma (negativa)
   const deudas = accounts.filter(a => a.type === 'Crédito').reduce((s, a) => s + a.balance, 0)
   const patrimonio = disponible + ahorro + deudas
 
-  async function addAccount(e: React.FormEvent) {
-    e.preventDefault()
-    const balance = parseFloat(form.balance.replace(/[^0-9-]/g, '')) || 0
-    const { error } = await supabase.from('accounts').insert({
-      profile_id: activeProfile!.id,
-      name: form.name, bank: form.bank,
-      type: form.type, balance, color: form.color,
-    })
-    if (error) { showToast('Error al agregar cuenta'); return }
-    showToast('✓ Cuenta agregada')
-    setAdding(false)
-    setForm({ name: '', bank: '', type: 'Cuenta', balance: '', color: 'emerald' })
-    load()
-  }
-
   return (
     <div>
-      <Topbar title="Cuentas" action={{ label: 'Agregar cuenta', onClick: () => setAdding(true) }} month={selectedMonth} onMonthChange={setSelectedMonth} />
+      <Topbar title="Cuentas" action={{ label: 'Agregar cuenta', onClick: () => setAdding(true) }} />
 
       <div className="scroll">
 
@@ -72,8 +56,8 @@ export default function CuentasPage() {
           </div>
           <div className="nw-breakdown">
             {[
-              { label: 'Disponible', val: disponible, dot: 'c-emerald' },
-              { label: 'Ahorro',     val: ahorro,     dot: 'c-violet' },
+              { label: 'Disponible', val: disponible, dot: 'c-emerald', red: false },
+              { label: 'Ahorro',     val: ahorro,     dot: 'c-violet', red: false },
               { label: 'Deudas',     val: Math.abs(deudas), dot: 'c-red', red: deudas < 0 },
             ].map(({ label, val, dot, red }) => (
               <div key={label} className="nw-item">
@@ -95,20 +79,51 @@ export default function CuentasPage() {
               <div className="acc-grid">
                 {accs.map(acc => {
                   const color = COLOR_HEX[acc.color] || '#34c98a'
-                  const isNeg = acc.balance < 0
+                  const isCredit = acc.type === 'Crédito'
+                  const debt = isCredit ? Math.abs(Math.min(0, acc.balance)) : 0
+                  const limit = acc.credit_limit ?? 0
+                  const available = limit - debt
+
                   return (
                     <div key={acc.id} className="card acc-card">
                       <div className="acc-top">
                         <div className="acc-ic" style={{ background: color + '20', border: `1.5px solid ${color}40`, fontSize: 18 }}>
-                          {type === 'Crédito' ? '💳' : type === 'Ahorro' ? '🏦' : '🏧'}
+                          {isCredit ? '💳' : type === 'Ahorro' ? '🏦' : '🏧'}
                         </div>
+                        <button
+                          onClick={() => setEditAcc(acc)}
+                          title="Editar cuenta"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', display: 'flex', padding: 4, borderRadius: 8, transition: 'color .15s' }}
+                          onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
+                          onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-faint)')}
+                        >
+                          <Pencil size={15} />
+                        </button>
                       </div>
-                      <div className="acc-name">{acc.name}</div>
+                      <div className="acc-name">{acc.name}{acc.last4 ? <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}> ••{acc.last4}</span> : null}</div>
                       <div className="acc-bank">{acc.bank}</div>
-                      <div className={`acc-balance${isNeg ? ' red' : ''}`}>
-                        {isNeg ? '−' : ''}{clp(Math.abs(acc.balance))}
-                      </div>
-                      <div className="acc-foot">{type}</div>
+
+                      {isCredit ? (
+                        <>
+                          <div className="acc-balance" style={{ color: debt > 0 ? 'var(--danger)' : 'var(--text)' }}>
+                            {debt > 0 ? '−' : ''}{clp(debt)}
+                          </div>
+                          <div className="acc-foot">
+                            Deuda · Disponible <b style={{ color: 'var(--ok)' }}>{clp(available)}</b>
+                            {limit > 0 && <span style={{ color: 'var(--text-faint)' }}> de {clp(limit)}</span>}
+                          </div>
+                          {limit > 0 && (
+                            <div className="progress-track" style={{ marginTop: 8 }}>
+                              <div className="progress-fill" style={{ width: `${Math.min(100, (debt / limit) * 100)}%`, background: debt / limit > 0.9 ? 'var(--danger)' : debt / limit > 0.7 ? 'var(--warn)' : color }} />
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <div className="acc-balance">{clp(acc.balance)}</div>
+                          <div className="acc-foot">{type}</div>
+                        </>
+                      )}
                     </div>
                   )
                 })}
@@ -117,39 +132,22 @@ export default function CuentasPage() {
           )
         })}
 
-        {accounts.length === 0 && !adding && (
+        {accounts.length === 0 && (
           <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--text-faint)' }}>
             <div style={{ fontSize: 32, marginBottom: 12 }}>🏦</div>
             <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>Sin cuentas todavía</div>
             <div style={{ fontSize: 13 }}>Agrega tu primera cuenta para comenzar a hacer seguimiento.</div>
           </div>
         )}
-
-        {/* Add account form */}
-        {adding && (
-          <div className="card">
-            <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Nueva cuenta</div>
-            <form onSubmit={addAccount} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <input className="text-input" type="text" placeholder="Nombre (ej: Cuenta Corriente)" required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-                <input className="text-input" type="text" placeholder="Banco" value={form.bank} onChange={e => setForm(f => ({ ...f, bank: e.target.value }))} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as AccountType }))} style={{ padding: '10px 14px', fontSize: 13.5, outline: 'none', cursor: 'pointer' }}>
-                  <option value="Cuenta">Cuenta corriente / vista</option>
-                  <option value="Ahorro">Ahorro / inversión</option>
-                  <option value="Crédito">Tarjeta de crédito</option>
-                </select>
-                <input className="text-input" type="text" inputMode="numeric" placeholder="Saldo actual ($)" value={form.balance} onChange={e => setForm(f => ({ ...f, balance: e.target.value.replace(/[^0-9-]/g, '') }))} />
-              </div>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button type="button" onClick={() => setAdding(false)} style={{ padding: '9px 18px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-2)', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13.5, cursor: 'pointer' }}>Cancelar</button>
-                <button type="submit" style={{ padding: '9px 18px', borderRadius: 'var(--radius-sm)', background: 'var(--accent)', color: '#06140e', border: 'none', fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}>Agregar</button>
-              </div>
-            </form>
-          </div>
-        )}
       </div>
+
+      {/* Modales crear / editar */}
+      {adding && (
+        <AccountModal profileId={activeProfile.id} onClose={() => setAdding(false)} onSaved={load} />
+      )}
+      {editAcc && (
+        <AccountModal profileId={activeProfile.id} account={editAcc} onClose={() => setEditAcc(null)} onSaved={load} />
+      )}
     </div>
   )
 }

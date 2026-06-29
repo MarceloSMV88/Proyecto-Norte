@@ -40,7 +40,9 @@ export interface Account {
   name: string
   bank: string
   type: AccountType
-  balance: number
+  balance: number          // Cuenta/Ahorro: saldo (≥0). Crédito: deuda como negativo.
+  credit_limit: number | null  // solo Crédito: cupo total
+  last4: string | null     // últimos 4 dígitos (TC, para mapeo Google Wallet)
   color: AccentColor
   created_at: string
 }

@@ -82,6 +82,7 @@ export default function ResumenPage() {
 
   // For selected month: use real daysLeft only for current month, otherwise use full month
   const isCurrentMonth = selectedMonth.slice(0, 7) === new Date().toISOString().slice(0, 7)
+  const monthName = new Date(selectedMonth + 'T12:00:00').toLocaleString('es-CL', { month: 'long' })
   const selDate = new Date(selectedMonth + 'T12:00:00')
   const totalDays = new Date(selDate.getFullYear(), selDate.getMonth() + 1, 0).getDate()
   const daysLeft = isCurrentMonth ? getDaysLeftInMonth() : totalDays
@@ -130,15 +131,22 @@ export default function ResumenPage() {
             <div className="hero-head">
               <span className="eyebrow">
                 <span className="dot" />
-                Disponible para gastar hoy
+                {isCurrentMonth ? 'Disponible para gastar hoy' : `Disponible variable · ${monthName}`}
               </span>
-              <span className="hero-chip">✦ Ritmo saludable</span>
+              {isCurrentMonth && <span className="hero-chip">✦ Ritmo saludable</span>}
             </div>
-            <div className="hero-amount">{clp(s.safeToday)}</div>
-            <p className="hero-note">
-              Después de cubrir gastos fijos y metas, puedes gastar esto hoy sin desviarte.
-              Te quedan <b>{daysLeft} días</b> en el mes y <b>{clp(s.variableAssigned - s.variableSpent)}</b> de presupuesto variable.
-            </p>
+            <div className="hero-amount">{clp(isCurrentMonth ? s.safeToday : s.variableAssigned - s.variableSpent)}</div>
+            {isCurrentMonth ? (
+              <p className="hero-note">
+                Después de cubrir gastos fijos y metas, puedes gastar esto hoy sin desviarte.
+                {daysLeft === 1 ? <> Queda <b>1 día</b></> : <> Te quedan <b>{daysLeft} días</b></>} en el mes y <b>{clp(s.variableAssigned - s.variableSpent)}</b> de presupuesto variable.
+              </p>
+            ) : (
+              <p className="hero-note">
+                Presupuesto variable de <b style={{ textTransform: 'capitalize' }}>{monthName}</b>: <b>{clp(s.variableSpent)}</b> gastado de <b>{clp(s.variableAssigned)}</b> asignado.
+              </p>
+            )}
+            {isCurrentMonth && (
             <div className="pace">
               <div className="pace-bar">
                 <div className="pace-fill" style={{ width: `${pacePct}%` }} />
@@ -149,6 +157,7 @@ export default function ResumenPage() {
                 <span>Recomendado <b>{clp(s.safeToday)}</b></span>
               </div>
             </div>
+            )}
             <div className="quick-actions">
               {([
                 ['gasto',  'Agregar gasto',   'red',    <ArrowUp size={16} key="up" />],
