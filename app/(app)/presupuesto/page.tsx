@@ -36,9 +36,9 @@ export default function PresupuestoPage() {
 
   if (!activeProfile) return null
   const summary = computeSummary(categories, accounts, activeProfile.income)
-  // Dinero realmente disponible para asignar = saldo en cuentas líquidas (Cuenta + Ahorro),
-  // las tarjetas de crédito son deuda y no suman. Se reparte entre las categorías.
-  const fundsAvailable = summary.available + summary.savings
+  // Dinero realmente disponible para asignar = saldo en cuentas corrientes (tipo Cuenta).
+  // El ahorro está reservado para metas y las TC son deuda: ninguno entra al presupuesto.
+  const fundsAvailable = summary.available
   const unassigned = fundsAvailable - summary.assignedTotal
 
   async function commitAssigned(id: string, val: string) {
