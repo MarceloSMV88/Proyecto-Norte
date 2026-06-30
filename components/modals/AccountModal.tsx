@@ -39,6 +39,7 @@ export default function AccountModal({ profileId, account, onClose, onSaved }: A
   const [type, setType] = useState<AccountType>(account?.type ?? 'Cuenta')
   const [color, setColor] = useState<AccentColor>(validColor(account?.color))
   const [last4, setLast4] = useState(account?.last4 ?? '')
+  const [accountNumber, setAccountNumber] = useState(account?.account_number ?? '')
   // Cuenta/Ahorro: saldo positivo
   const [balance, setBalance] = useState(account && account.type !== 'Crédito' ? String(Math.abs(account.balance)) : '')
   // Crédito: cupo total + deuda actual (balance se guarda como negativo)
@@ -63,7 +64,8 @@ export default function AccountModal({ profileId, account, onClose, onSaved }: A
       bank: bank.trim(),
       type,
       color,
-      last4: last4.trim() || null,
+      last4: isCredit ? (last4.trim() || null) : null,
+      account_number: !isCredit ? (accountNumber.trim() || null) : null,
     }
     if (isCredit) {
       payload.balance = -num(debt)          // deuda como negativo
@@ -157,6 +159,8 @@ export default function AccountModal({ profileId, account, onClose, onSaved }: A
                 <span className="amount-cur">$</span>
                 <input className="amount-input" type="text" inputMode="numeric" placeholder="0" value={fmt(balance)} onChange={e => setBalance(e.target.value)} />
               </div>
+              <label className="field-label" style={{ marginTop: 16 }}>N° de cuenta <span style={{ textTransform: 'none', color: 'var(--text-faint)', fontWeight: 400 }}>(para capturar transferencias por correo)</span></label>
+              <input className="text-input" type="text" placeholder="Ej: 0-000-62-61065-4" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} />
             </>
           )}
 
