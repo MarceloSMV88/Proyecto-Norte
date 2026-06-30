@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { X, Flag } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
+import { useEscapeClose } from '@/lib/useEscapeClose'
 import type { AccentColor, Goal } from '@/lib/types'
 
 const COLORS: { key: AccentColor; hex: string; label: string }[] = [
@@ -30,6 +31,7 @@ export default function GoalModal({ profileId, goal, onClose, onSaved }: GoalMod
   const [saving, setSaving]   = useState(false)
   const { showToast } = useToast()
   const supabase = createClient()
+  useEscapeClose(onClose)
 
   const selectedColor = COLORS.find(c => c.key === color)!
   const n = parseInt(target.replace(/\D/g, '')) || 0

@@ -5,9 +5,15 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 const DAYS = ['Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá', 'Do']
 const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
+/** Fecha YYYY-MM-DD en hora de Chile (no UTC). */
+function todayCL(offsetDays = 0): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(new Date(Date.now() + offsetDays * 86400000))
+}
+
 function isoToDisplay(iso: string, withYear = true): string {
-  const today = new Date().toISOString().slice(0, 10)
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  const today = todayCL(0)
+  const yesterday = todayCL(-1)
   if (iso === today) return 'Hoy'
   if (iso === yesterday) return 'Ayer'
   const d = new Date(iso + 'T12:00:00')
@@ -40,7 +46,7 @@ export default function DatePicker(props: DatePickerProps) {
   const isRange = props.range === true
 
   const [open, setOpen] = useState(false)
-  const anchorIso = (isRange ? props.from : props.value) || new Date().toISOString().slice(0, 10)
+  const anchorIso = (isRange ? props.from : props.value) || todayCL(0)
   const [viewYear, setViewYear] = useState(() => new Date(anchorIso + 'T12:00:00').getFullYear())
   const [viewMonth, setViewMonth] = useState(() => new Date(anchorIso + 'T12:00:00').getMonth())
   const ref = useRef<HTMLDivElement>(null)
@@ -65,7 +71,7 @@ export default function DatePicker(props: DatePickerProps) {
   const firstDay = new Date(viewYear, viewMonth, 1).getDay()
   const startOffset = firstDay === 0 ? 6 : firstDay - 1
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate()
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayCL(0)
 
   const cells: (number | null)[] = [
     ...Array(startOffset).fill(null),

@@ -1,6 +1,7 @@
 'use client'
 import { ChevronLeft, ChevronRight, Calendar, Plus } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
+import { getCurrentMonth } from '@/lib/utils'
 
 interface TopbarProps {
   title: string
@@ -113,7 +114,7 @@ function MonthPicker({ month, onMonthChange }: { month: string; onMonthChange: (
           {/* Ir al mes actual */}
           <button
             type="button"
-            onClick={() => { const now = new Date(); onMonthChange(now.toISOString().slice(0, 7) + '-01'); setOpen(false) }}
+            onClick={() => { onMonthChange(getCurrentMonth()); setOpen(false) }}
             style={{
               marginTop: 12, width: '100%', padding: '8px', borderRadius: 9,
               border: '1px solid var(--border)', background: 'var(--surface-2)',

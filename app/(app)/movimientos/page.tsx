@@ -6,7 +6,7 @@ import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
 import TransactionModal from '@/components/modals/TransactionModal'
 import DatePicker from '@/components/ui/DatePicker'
-import { clp, formatDate } from '@/lib/utils'
+import { clp, formatDate, getCurrentMonth } from '@/lib/utils'
 import { catEmoji } from '@/lib/icons'
 import type { Transaction, Category, Account } from '@/lib/types'
 
@@ -21,7 +21,7 @@ function nextMonthStr(month: string): string {
 export default function MovimientosPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7) + '-01')
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])

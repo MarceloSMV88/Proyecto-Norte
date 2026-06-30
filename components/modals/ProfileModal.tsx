@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
+import { useEscapeClose } from '@/lib/useEscapeClose'
 import type { AccentColor, ProfileRole } from '@/lib/types'
 
 const COLORS: AccentColor[] = ['emerald', 'blue', 'violet', 'amber', 'red']
@@ -21,6 +22,7 @@ export default function ProfileModal({ createdBy, onClose, onSaved }: {
   const [saving, setSaving] = useState(false)
   const { showToast } = useToast()
   const supabase = createClient()
+  useEscapeClose(onClose)
 
   const name = fullName.trim().split(/\s+/)[0] || ''
   const initials = fullName.trim().split(/\s+/).map(p => p[0]).join('').toUpperCase().slice(0, 2)

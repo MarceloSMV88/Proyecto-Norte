@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
 import BarPairs from '@/components/charts/BarPairs'
-import { clp, clpShort, computeSummary, getDaysLeftInMonth } from '@/lib/utils'
+import { clp, clpShort, computeSummary, getDaysLeftInMonth, getCurrentMonth, todayCL } from '@/lib/utils'
 import { catEmoji } from '@/lib/icons'
 import type { Category, Account, Goal, Transaction, Upcoming, MonthlyBar } from '@/lib/types'
 import TransactionModal from '@/components/modals/TransactionModal'
@@ -21,7 +21,7 @@ export default function ResumenPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
 
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7) + '-01')
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
   const [categories, setCategories] = useState<Category[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [goals, setGoals] = useState<Goal[]>([])
@@ -81,7 +81,7 @@ export default function ResumenPage() {
   if (!activeProfile) return null
 
   // For selected month: use real daysLeft only for current month, otherwise use full month
-  const isCurrentMonth = selectedMonth.slice(0, 7) === new Date().toISOString().slice(0, 7)
+  const isCurrentMonth = selectedMonth.slice(0, 7) === todayCL(0).slice(0, 7)
   const monthName = new Date(selectedMonth + 'T12:00:00').toLocaleString('es-CL', { month: 'long' })
   const selDate = new Date(selectedMonth + 'T12:00:00')
   const totalDays = new Date(selDate.getFullYear(), selDate.getMonth() + 1, 0).getDate()
@@ -96,7 +96,7 @@ export default function ResumenPage() {
 
   // Pace bar
   const spentToday = transactions
-    .filter(t => t.date === new Date().toISOString().slice(0, 10) && t.type === 'gasto')
+    .filter(t => t.date === todayCL(0) && t.type === 'gasto')
     .reduce((a, t) => a + Math.abs(t.amount), 0)
   const pacePct = s.safeToday > 0 ? Math.min(100, (spentToday / (s.safeToday * 1.6)) * 100) : 0
   const markerPct = s.safeToday > 0 ? (s.safeToday / (s.safeToday * 1.6)) * 100 : 62

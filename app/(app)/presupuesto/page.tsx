@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
 import CategoryModal from '@/components/modals/CategoryModal'
-import { clp, computeSummary } from '@/lib/utils'
+import { clp, computeSummary, getCurrentMonth } from '@/lib/utils'
 import { catEmoji } from '@/lib/icons'
 import type { Category, Account, CategoryGroup } from '@/lib/types'
 
@@ -14,7 +14,7 @@ const GROUPS: CategoryGroup[] = ['Fijos', 'Variables', 'Ahorro']
 export default function PresupuestoPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7) + '-01')
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
   const [categories, setCategories] = useState<Category[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [editing, setEditing] = useState<string | null>(null)
@@ -36,7 +36,10 @@ export default function PresupuestoPage() {
 
   if (!activeProfile) return null
   const summary = computeSummary(categories, accounts, activeProfile.income)
-  const unassigned = summary.unassigned
+  // Dinero realmente disponible para asignar = saldo en cuentas líquidas (Cuenta + Ahorro),
+  // las tarjetas de crédito son deuda y no suman. Se reparte entre las categorías.
+  const fundsAvailable = summary.available + summary.savings
+  const unassigned = fundsAvailable - summary.assignedTotal
 
   async function commitAssigned(id: string, val: string) {
     setEditing(null)
@@ -72,7 +75,7 @@ export default function PresupuestoPage() {
               {clp(unassigned)}
             </div>
             <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 6 }}>
-              Ingreso {clp(summary.income)} · Asignado {clp(summary.assignedTotal)}
+              En cuentas {clp(fundsAvailable)} · Asignado {clp(summary.assignedTotal)}
             </div>
           </div>
 
@@ -89,12 +92,12 @@ export default function PresupuestoPage() {
           const dispTotal = summary.assignedTotal - summary.spentTotal
           const spentColor = summary.spentTotal > summary.assignedTotal ? 'var(--danger)' : spentPct > 0.88 ? 'var(--warn)' : 'var(--text)'
           const dispColor  = dispTotal < 0 ? 'var(--danger)' : spentPct > 0.88 ? 'var(--warn)' : 'var(--ok)'
-          // Asignado vs ingreso: rojo si te pasaste, verde si calza exacto, neutro si aún queda por asignar
-          const assignedColor = summary.assignedTotal > summary.income ? 'var(--danger)' : summary.assignedTotal === summary.income ? 'var(--ok)' : 'var(--text-2)'
+          // Asignado vs fondos en cuentas: rojo si asignaste más de lo que tienes, verde si calza exacto, neutro si aún queda por asignar
+          const assignedColor = summary.assignedTotal > fundsAvailable ? 'var(--danger)' : summary.assignedTotal === fundsAvailable && fundsAvailable > 0 ? 'var(--ok)' : 'var(--text-2)'
           return (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 'var(--gap)' }}>
           {[
-            ['Ingreso', summary.income, 'var(--text)'],
+            ['En cuentas', fundsAvailable, 'var(--text)'],
             ['Asignado', summary.assignedTotal, assignedColor],
             ['Gastado', summary.spentTotal, spentColor],
             ['Disponible total', dispTotal, dispColor],

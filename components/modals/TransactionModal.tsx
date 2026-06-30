@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
 import DatePicker from '@/components/ui/DatePicker'
 import { catEmoji } from '@/lib/icons'
+import { todayCL } from '@/lib/utils'
+import { useEscapeClose } from '@/lib/useEscapeClose'
 import type { TransactionType, Category, Account } from '@/lib/types'
 
 type ModalType = 'gasto' | 'ingreso' | 'mover'
@@ -27,10 +29,11 @@ export default function TransactionModal({ type, profileId, categories, accounts
   const [categoryId, setCategoryId] = useState('')
   const [description, setDescription] = useState('')
   const [accountId, setAccountId] = useState(accounts[0]?.id || '')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(todayCL(0))
   const [saving, setSaving] = useState(false)
   const { showToast } = useToast()
   const supabase = createClient()
+  useEscapeClose(onClose)
   const cfg = CONFIG[type]
 
   const n = parseInt(rawAmount.replace(/\D/g, '')) || 0

@@ -4,6 +4,7 @@ import { X, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
 import { clp } from '@/lib/utils'
+import { useEscapeClose } from '@/lib/useEscapeClose'
 import type { Account, AccountType, AccentColor } from '@/lib/types'
 
 const TYPES: { key: AccountType; label: string }[] = [
@@ -32,6 +33,7 @@ const num = (s: string) => parseInt(s.replace(/\D/g, '')) || 0
 
 export default function AccountModal({ profileId, account, onClose, onSaved }: AccountModalProps) {
   const isEdit = !!account
+  useEscapeClose(onClose)
   const validColor = (c?: string): AccentColor => (COLORS.some(x => x.key === c) ? c as AccentColor : 'emerald')
 
   const [name, setName] = useState(account?.name ?? '')

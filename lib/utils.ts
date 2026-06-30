@@ -12,11 +12,19 @@ export function clpShort(n: number): string {
   return '$' + Math.round(n)
 }
 
+/** Fecha YYYY-MM-DD en hora de Chile (no UTC). offsetDays desplaza días. */
+export function todayCL(offsetDays = 0): string {
+  const ms = Date.now() + offsetDays * 86400000
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(ms))
+}
+
 export function formatDate(dateStr: string): string {
   // Parse at local noon to avoid UTC-midnight shifting the date a day back
   const d = new Date(dateStr.slice(0, 10) + 'T12:00:00')
-  const todayIso = new Date().toISOString().slice(0, 10)
-  const yesterdayIso = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  const todayIso = todayCL(0)
+  const yesterdayIso = todayCL(-1)
   const iso = dateStr.slice(0, 10)
 
   if (iso === todayIso) return 'Hoy'
@@ -49,7 +57,7 @@ export function getDaysLeftInMonth(): number {
 }
 
 export function getCurrentMonth(): string {
-  return new Date().toISOString().slice(0, 7) + '-01'
+  return todayCL(0).slice(0, 7) + '-01'
 }
 
 export function cn(...classes: (string | undefined | false | null)[]): string {

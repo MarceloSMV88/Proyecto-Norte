@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
 import BarPairs from '@/components/charts/BarPairs'
-import { clp, clpShort } from '@/lib/utils'
+import { clp, clpShort, getCurrentMonth } from '@/lib/utils'
 import type { Category, Subscription, Transaction, MonthlyBar } from '@/lib/types'
 
 const USAGE_COLOR = { alto: 'var(--ok)', medio: 'var(--warn)', bajo: 'var(--danger)' } as const
@@ -13,7 +13,7 @@ const USAGE_LABEL = { alto: 'Alto uso', medio: 'Uso medio', bajo: 'Bajo uso' } a
 export default function HabitosPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7) + '-01')
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
   const [categories, setCategories] = useState<Category[]>([])
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([])
   const [months, setMonths] = useState<MonthlyBar[]>([])

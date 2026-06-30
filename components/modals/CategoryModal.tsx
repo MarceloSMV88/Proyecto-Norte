@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { X, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
+import { useEscapeClose } from '@/lib/useEscapeClose'
 import { ICON_CATALOG, catEmoji } from '@/lib/icons'
 import type { Category, CategoryGroup, AccentColor } from '@/lib/types'
 
@@ -36,6 +37,7 @@ export default function CategoryModal({ profileId, month, category, defaultGroup
   const [saving, setSaving] = useState(false)
   const { showToast } = useToast()
   const supabase = createClient()
+  useEscapeClose(onClose)
 
   const assignedN = parseInt(assigned.replace(/\D/g, '')) || 0
   const formattedAssigned = assignedN > 0 ? assignedN.toLocaleString('es-CL') : ''

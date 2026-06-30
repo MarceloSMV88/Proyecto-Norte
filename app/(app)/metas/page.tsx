@@ -6,7 +6,7 @@ import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
 import ProgressRing from '@/components/charts/ProgressRing'
 import GoalModal from '@/components/modals/GoalModal'
-import { clp, clpShort } from '@/lib/utils'
+import { clp, clpShort, getCurrentMonth } from '@/lib/utils'
 import type { Goal } from '@/lib/types'
 
 const COLOR_HEX: Record<string, string> = {
@@ -16,7 +16,7 @@ const COLOR_HEX: Record<string, string> = {
 export default function MetasPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7) + '-01')
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
   const [goals, setGoals] = useState<Goal[]>([])
   const [showModal, setShowModal] = useState(false)
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null)
