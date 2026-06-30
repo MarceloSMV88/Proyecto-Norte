@@ -13,13 +13,24 @@
 const ENDPOINT = 'https://gfswrtyxgsxakkpgduda.supabase.co/functions/v1/transfer-ingest';
 const SECRET   = 'bd7d9dfa18af488ca9b89e3335efedf56a9bdbb5892a4f96bd6dfde12874f29a';
 const LABEL    = 'norte-procesado';
+const SEARCH   = '(from:santander.cl OR from:bancochile.cl OR from:bancoripley.cl) '
+               + 'subject:(transferencia OR Comprobante OR Transferencias)';
+
+/**
+ * EJECUTAR UNA SOLA VEZ antes de activar el trigger.
+ * Marca todos los correos de transferencia EXISTENTES como procesados (sin enviarlos),
+ * para que no se re-importen y dupliquen los saldos ya cargados manualmente.
+ */
+function marcarBaseline() {
+  const label = GmailApp.getUserLabelByName(LABEL) || GmailApp.createLabel(LABEL);
+  const threads = GmailApp.search(SEARCH + ' -label:' + LABEL + ' newer_than:180d', 0, 200);
+  threads.forEach(t => t.addLabel(label));
+  Logger.log('Baseline: ' + threads.length + ' hilos marcados como procesados.');
+}
 
 function procesarTransferencias() {
   const label = GmailApp.getUserLabelByName(LABEL) || GmailApp.createLabel(LABEL);
-  const query = '(from:santander.cl OR from:bancochile.cl OR from:bancoripley.cl) '
-              + 'subject:(transferencia OR Comprobante OR Transferencias) '
-              + '-label:' + LABEL + ' newer_than:7d';
-  const threads = GmailApp.search(query, 0, 30);
+  const threads = GmailApp.search(SEARCH + ' -label:' + LABEL + ' newer_than:7d', 0, 30);
 
   threads.forEach(thread => {
     thread.getMessages().forEach(msg => {
