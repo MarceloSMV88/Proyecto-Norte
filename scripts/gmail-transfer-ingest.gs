@@ -83,11 +83,13 @@ function parseChile(txt) {
   const idxDest = txt.search(/Datos\s+de\s+la\s+Transferencia/i);
   const dBlk = txt.search(/Datos\s+del\s+Destinatario/i) > -1
     ? txt.slice(txt.search(/Datos\s+del\s+Destinatario/i), idxDest > -1 ? idxDest : undefined) : txt;
+  // Bloque "Datos de la Transferencia" (trae la cuenta de ORIGEN). NO usar fallback global (agarra la del destinatario).
+  const txBlk = idxDest > -1 ? txt.slice(idxDest) : '';
   return {
     amount:        money(txt, /Monto[^$]*\$\s*([\d.]+)/i),
     date:          g(/(\d{1,2}\/\d{1,2}\/\d{4})/, txt),
     originMine:    true, // "usted ha efectuado una transferencia ... desde su Cuenta Corriente"
-    originAccount: g(/desde su Cuenta Corriente\s*([\d.\-]+)/i, txt) || g(/Cuenta[:\s]*([\d.\-]{6,})/i, txt),
+    originAccount: g(/desde su Cuenta Corriente\s*([\d.\-]+)/i, txt) || g(/Cuenta[:\s]*([\d.\-]{6,})/i, txBlk),
     originBank:    'Banco de Chile',
     destName:      g(/Nombre[:\s]*([^\n\r]+)/i, dBlk),
     destRut:       g(/Rut[:\s]*([\dkK.\-]+)/i, dBlk),

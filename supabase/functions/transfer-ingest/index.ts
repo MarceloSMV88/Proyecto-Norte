@@ -62,8 +62,10 @@ Deno.serve(async (req) => {
 
   const originRut = digits(b.originRut)
   const destRut = digits(b.destRut)
-  const originAcctD = digits(b.originAccount)
+  let originAcctD = digits(b.originAccount)
   const destAcctD = digits(b.destAccount)
+  // Guard: si el parser conflació origen y destino al mismo número, no confiar en el de origen
+  if (originAcctD && originAcctD === destAcctD) originAcctD = ''
   const originBankN = normBank(b.originBank)
   const destBankN = normBank(b.destBank)
   const originName = String(b.originName ?? '').trim()
@@ -139,14 +141,18 @@ Deno.serve(async (req) => {
   }).select('id').single()
   if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
 
-  if (txType === 'transfer') {
-    if (originAcc) await sb.from('accounts').update({ balance: originAcc.balance - amount }).eq('id', originAcc.id)
-    if (destAcc) await sb.from('accounts').update({ balance: destAcc.balance + amount }).eq('id', destAcc.id)
-  } else if (txType === 'ingreso' && destAcc) {
-    await sb.from('accounts').update({ balance: destAcc.balance + amount }).eq('id', destAcc.id)
-  } else if (txType === 'gasto' && originAcc) {
-    await sb.from('accounts').update({ balance: originAcc.balance - amount }).eq('id', originAcc.id)
+  // Guard: si origen y destino son la MISMA cuenta, no-op (evita sobreescritura)
+  const sameAccount = originAcc && destAcc && originAcc.id === destAcc.id
+  if (!sameAccount) {
+    if (txType === 'transfer') {
+      if (originAcc) await sb.from('accounts').update({ balance: originAcc.balance - amount }).eq('id', originAcc.id)
+      if (destAcc) await sb.from('accounts').update({ balance: destAcc.balance + amount }).eq('id', destAcc.id)
+    } else if (txType === 'ingreso' && destAcc) {
+      await sb.from('accounts').update({ balance: destAcc.balance + amount }).eq('id', destAcc.id)
+    } else if (txType === 'gasto' && originAcc) {
+      await sb.from('accounts').update({ balance: originAcc.balance - amount }).eq('id', originAcc.id)
+    }
   }
 
-  return json({ ok: true, inserted: true, id: ins.id, classification: txType, amount, date: dateStr, origin_matched: !!originAcc, dest_matched: !!destAcc, isOriginYou, isDestYou })
+  return json({ ok: true, inserted: true, id: ins.id, classification: txType, amount, date: dateStr, origin_matched: !!originAcc, dest_matched: !!destAcc, same_account: !!sameAccount, isOriginYou, isDestYou })
 })
