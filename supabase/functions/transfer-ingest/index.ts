@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
     if (dup && dup.length > 0) return json({ ok: true, inserted: false, reason: 'duplicate' })
 
     // Cuenta de cargo por número (tolerante a ceros a la izquierda)
-    const { data: accts } = await sb.from('accounts').select('id, balance, account_number').eq('profile_id', profileId)
+    const { data: accts } = await sb.from('accounts').select('id, account_number').eq('profile_id', profileId)
     const k = acctKey(digits(b.originAccount))
     const acc = k ? ((accts ?? []).find(a => a.account_number && acctKey(digits(a.account_number)) === k) ?? null) : null
 
@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
     }).select('id').single()
     if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
 
-    if (acc) await sb.from('accounts').update({ balance: acc.balance - amt }).eq('id', acc.id)
+    // El saldo lo sincroniza el trigger de BD (migración 006).
 
     return json({ ok: true, inserted: true, id: ins.id, kind: 'pago_servicio', empresa, amount: amt, account_matched: !!acc, category_matched: !!categoryId, date: dateStr })
   }
@@ -127,7 +127,7 @@ Deno.serve(async (req) => {
   const profileTokens = new Set([...nameTokens(adminProf.full_name), ...nameTokens(adminProf.name)])
   const nameYou = (n: string) => nameTokens(n).filter(t => profileTokens.has(t)).length >= 2
 
-  const { data: accts } = await sb.from('accounts').select('id, balance, account_number, bank, name, type').eq('profile_id', profileId)
+  const { data: accts } = await sb.from('accounts').select('id, account_number, bank, name, type').eq('profile_id', profileId)
   const byNumber = (d: string) => {
     const k = acctKey(d)
     return k ? ((accts ?? []).find(a => a.account_number && acctKey(digits(a.account_number)) === k) ?? null) : null
@@ -182,18 +182,8 @@ Deno.serve(async (req) => {
   const { data: ins, error: insErr } = await sb.from('transactions').insert(rows).select('id')
   if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
 
-  // Mover saldos (una vez). Guard: misma cuenta => no-op
-  const sameAccount = originAcc && destAcc && originAcc.id === destAcc.id
-  if (!sameAccount) {
-    if (txType === 'transfer') {
-      if (originAcc) await sb.from('accounts').update({ balance: originAcc.balance - amount }).eq('id', originAcc.id)
-      if (destAcc) await sb.from('accounts').update({ balance: destAcc.balance + amount }).eq('id', destAcc.id)
-    } else if (txType === 'ingreso' && destAcc) {
-      await sb.from('accounts').update({ balance: destAcc.balance + amount }).eq('id', destAcc.id)
-    } else if (txType === 'gasto' && originAcc) {
-      await sb.from('accounts').update({ balance: originAcc.balance - amount }).eq('id', originAcc.id)
-    }
-  }
+  // Los saldos los sincroniza el trigger de BD (migración 006) por cada pata insertada.
+  // (Caso "misma cuenta": las patas ±X se anulan solas.)
 
   return json({ ok: true, inserted: true, legs: (ins ?? []).length, ids: (ins ?? []).map(r => r.id), classification: txType, amount, date: dateStr, origin_matched: !!originAcc, dest_matched: !!destAcc })
 })

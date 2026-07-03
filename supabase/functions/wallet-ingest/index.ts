@@ -74,14 +74,13 @@ Deno.serve(async (req) => {
   //    Cada TC pertenece a un perfil -> el pago se atribuye al dueño de la tarjeta (aislación por perfil).
   let profileId: string | null = null
   let accountId: string | null = null
-  let accountBalance = 0
   if (last4) {
     const { data: acc } = await sb.from('accounts')
-      .select('id, balance, profile_id')
+      .select('id, profile_id')
       .eq('last4', last4)
       .limit(1)
       .maybeSingle()
-    if (acc) { accountId = acc.id; accountBalance = acc.balance; profileId = acc.profile_id }
+    if (acc) { accountId = acc.id; profileId = acc.profile_id }
   }
   // Fallback: tarjeta no registrada -> perfil Admin (single-user), sin cuenta asociada.
   if (!profileId) {
@@ -140,10 +139,7 @@ Deno.serve(async (req) => {
 
   if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
 
-  // 8) Aumentar deuda de la TC (balance baja en el monto gastado)
-  if (accountId) {
-    await sb.from('accounts').update({ balance: accountBalance - amt }).eq('id', accountId)
-  }
+  // El saldo de la cuenta lo sincroniza el trigger de BD (migración 006), no la función.
 
   return json({
     ok: true,
