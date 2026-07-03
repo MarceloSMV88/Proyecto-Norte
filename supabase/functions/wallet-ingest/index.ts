@@ -3,6 +3,8 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 // Ingesta de gastos con tarjeta desde notificaciones de Google Wallet.
 // Flujo: MacroDroid (Android) -> POST aquí -> parsea -> inserta transaction + sube deuda TC.
 // Auth: header `x-ingest-secret` comparado contra tabla `ingest_config` (no JWT).
+// v3: payloads que fallan se guardan en `ingest_failures` para diagnóstico;
+//     parseo tolerante (CLP/$, with/con).
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -26,31 +28,45 @@ Deno.serve(async (req) => {
 
   const sb = createClient(SUPABASE_URL, SERVICE_KEY)
 
+  // Registrar payloads fallidos para diagnóstico (solo tras pasar auth)
+  async function logFailure(reason: string, payload: unknown, raw?: string) {
+    console.error(`wallet-ingest ${reason}:`, raw ?? JSON.stringify(payload))
+    await sb.from('ingest_failures').insert({
+      fn: 'wallet-ingest', reason, payload: payload ?? null, raw: raw ?? null,
+    })
+  }
+
   // 1) Auth por header secreto
   const provided = req.headers.get('x-ingest-secret') ?? ''
   const { data: cfg } = await sb.from('ingest_config').select('secret').eq('id', 1).single()
   if (!cfg || provided !== cfg.secret) return json({ error: 'unauthorized' }, 401)
 
-  // 2) Body
+  // 2) Body (leer crudo primero para poder registrarlo si el JSON viene roto)
+  const rawBody = await req.text()
   let body: Record<string, unknown>
-  try { body = await req.json() } catch { return json({ error: 'bad_json' }, 400) }
+  try { body = JSON.parse(rawBody) } catch {
+    await logFailure('bad_json', null, rawBody)
+    return json({ error: 'bad_json' }, 400)
+  }
 
   const title = String(body.title ?? '').trim()
   const text = String(body.text ?? '').trim()
   const postTime = body.postTime ? Number(body.postTime) : null
 
   // 3) Parseo (formato Google Wallet: título=comercio, cuerpo="CLP1,500 with <tarjeta> ••5116")
+  //    Tolerante: acepta "CLP 1.500" / "$1.500" y "with"/"con".
   const merchant = title.replace(/\s+/g, ' ').trim()
-  const amountMatch = text.match(/CLP\s*([\d.,]+)/i)
+  const amountMatch = text.match(/(?:CLP|\$)\s*([\d.,]+)/i)
   const amt = amountMatch ? parseInt(amountMatch[1].replace(/[^0-9]/g, ''), 10) : NaN
   const last4 = (text.match(/(\d{4})(?=\D*$)/) ?? [])[1] ?? null
-  const cardName = (text.match(/with\s+(.+?)\s+[••·*]{1,2}\s*\d{4}/i) ?? [])[1] ?? null
+  const cardName = (text.match(/(?:with|con)\s+(.+?)\s+[••·*]{1,2}\s*\d{4}/i) ?? [])[1] ?? null
 
   if (!merchant || isNaN(amt) || amt <= 0) {
+    await logFailure('parse_failed', { title, text, postTime })
     return json({ error: 'parse_failed', merchant, amt, raw: { title, text } }, 400)
   }
 
-  const when = postTime ? new Date(postTime) : new Date()
+  const when = postTime && Number.isFinite(postTime) ? new Date(postTime) : new Date()
   const dateStr = chileDate(when)
   const month = dateStr.slice(0, 7) + '-01'
 

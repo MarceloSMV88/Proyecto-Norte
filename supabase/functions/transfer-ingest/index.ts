@@ -14,6 +14,8 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
 const digits = (s: unknown) => String(s ?? '').replace(/\D/g, '')
+// Los bancos escriben la misma cuenta con o sin ceros a la izquierda (00-407-01867-01 vs 4070186701)
+const acctKey = (d: string) => d.replace(/^0+/, '')
 function normBank(s: unknown): string {
   return String(s ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/\b(banco|de|del|la|el|cuenta|corriente|vista|ahorro|cl|sa|s\.a\.)\b/g, '').replace(/[^a-z0-9]/g, '')
@@ -45,6 +47,59 @@ Deno.serve(async (req) => {
   let b: Record<string, unknown>
   try { b = await req.json() } catch { return json({ error: 'bad_json' }, 400) }
 
+  // === Pago de cuentas de servicio (mail "Comprobante de pago" del Chile, N items por mail) ===
+  // Cada item es un gasto: cargo a la cuenta de origen + categoría por reglas sobre
+  // "EMPRESA IDENTIFICADOR" (permite reglas por n° de cliente, ej. mismo Enel en 2 propiedades).
+  if (String(b.kind ?? '') === 'pago_servicio') {
+    const amt = parseInt(digits(b.amount), 10)
+    if (!amt || amt <= 0) return json({ error: 'bad_amount', got: b.amount }, 400)
+    const empresa = String(b.empresa ?? '').replace(/\s+/g, ' ').trim()
+    if (!empresa) return json({ error: 'bad_empresa' }, 400)
+    const identificador = String(b.identificador ?? '').trim()
+    const dateStr = normDate(b.date)
+    const month = dateStr.slice(0, 7) + '-01'
+
+    const { data: adminProf } = await sb.from('profiles').select('id').eq('role', 'Admin').limit(1).single()
+    if (!adminProf) return json({ error: 'no_profile' }, 500)
+    const profileId = adminProf.id as string
+
+    // Dedup: mismo servicio + monto + fecha (comprobante reprocesado)
+    const { data: dup } = await sb.from('transactions').select('id')
+      .eq('profile_id', profileId).eq('name', empresa).eq('amount', -amt).eq('date', dateStr).limit(1)
+    if (dup && dup.length > 0) return json({ ok: true, inserted: false, reason: 'duplicate' })
+
+    // Cuenta de cargo por número (tolerante a ceros a la izquierda)
+    const { data: accts } = await sb.from('accounts').select('id, balance, account_number').eq('profile_id', profileId)
+    const k = acctKey(digits(b.originAccount))
+    const acc = k ? ((accts ?? []).find(a => a.account_number && acctKey(digits(a.account_number)) === k) ?? null) : null
+
+    // Categoría por reglas (match sobre empresa + identificador)
+    let categoryId: string | null = null
+    const { data: rules } = await sb.from('category_rules').select('pattern, category_name').eq('profile_id', profileId)
+    if (rules) {
+      const up = `${empresa} ${identificador}`.toUpperCase()
+      const match = rules.filter(r => up.includes(String(r.pattern).toUpperCase()))
+        .sort((r1, r2) => String(r2.pattern).length - String(r1.pattern).length)[0]
+      if (match) {
+        const { data: cat } = await sb.from('categories').select('id')
+          .eq('profile_id', profileId).eq('name', match.category_name).eq('month', month).limit(1).maybeSingle()
+        if (cat) categoryId = cat.id
+      }
+    }
+
+    const { data: ins, error: insErr } = await sb.from('transactions').insert({
+      profile_id: profileId, name: empresa, amount: -amt, type: 'gasto',
+      category_id: categoryId, account_id: acc?.id ?? null,
+      description: identificador ? `N° cliente ${identificador}` : null,
+      source: 'gmail_pago', date: dateStr,
+    }).select('id').single()
+    if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
+
+    if (acc) await sb.from('accounts').update({ balance: acc.balance - amt }).eq('id', acc.id)
+
+    return json({ ok: true, inserted: true, id: ins.id, kind: 'pago_servicio', empresa, amount: amt, account_matched: !!acc, category_matched: !!categoryId, date: dateStr })
+  }
+
   const amount = parseInt(digits(b.amount), 10)
   if (!amount || amount <= 0) return json({ error: 'bad_amount', got: b.amount }, 400)
   const dateStr = normDate(b.date)
@@ -53,7 +108,7 @@ Deno.serve(async (req) => {
   let originAcctD = digits(b.originAccount)
   const destAcctD = digits(b.destAccount)
   // Guard: si el parser conflació origen y destino al mismo número, no confiar en el de origen
-  if (originAcctD && originAcctD === destAcctD) originAcctD = ''
+  if (originAcctD && acctKey(originAcctD) === acctKey(destAcctD)) originAcctD = ''
   const originBankRaw = String(b.originBank ?? '').trim()
   const destBankRaw = String(b.destBank ?? '').trim()
   const originBankN = normBank(originBankRaw)
@@ -73,7 +128,10 @@ Deno.serve(async (req) => {
   const nameYou = (n: string) => nameTokens(n).filter(t => profileTokens.has(t)).length >= 2
 
   const { data: accts } = await sb.from('accounts').select('id, balance, account_number, bank, name, type').eq('profile_id', profileId)
-  const byNumber = (d: string) => d ? ((accts ?? []).find(a => a.account_number && digits(a.account_number) === d) ?? null) : null
+  const byNumber = (d: string) => {
+    const k = acctKey(d)
+    return k ? ((accts ?? []).find(a => a.account_number && acctKey(digits(a.account_number)) === k) ?? null) : null
+  }
   const byBank = (bn: string) => {
     if (!bn || bn.length < 3) return null
     return (accts ?? []).find(a => { if (a.type === 'Crédito') return false; const ab = normBank(a.bank), an = normBank(a.name); return ab === bn || an === bn || ab.includes(bn) || an.includes(bn) }) ?? null
@@ -93,11 +151,11 @@ Deno.serve(async (req) => {
   // Dedup cross-bank
   const { data: cands } = await sb.from('transactions').select('id, description')
     .eq('profile_id', profileId).eq('source', 'gmail_transfer').eq('date', dateStr).or(`amount.eq.${-amount},amount.eq.${amount}`)
-  const newAccts = [originAcctD, destAcctD].filter(Boolean)
+  const newAccts = [originAcctD, destAcctD].filter(Boolean).map(acctKey)
   const newPair = [originBankN, destBankN].filter(Boolean).sort().join('|')
   for (const c of (cands ?? [])) {
     const t = tokens(String(c.description ?? ''))
-    const exAccts = [t.oa, t.da].filter(Boolean)
+    const exAccts = [t.oa, t.da].filter(Boolean).map(acctKey)
     const sharesAcct = newAccts.some(a => exAccts.includes(a))
     const exPair = [t.ob, t.db].filter(Boolean).sort().join('|')
     const samePair = newPair && exPair && newPair === exPair

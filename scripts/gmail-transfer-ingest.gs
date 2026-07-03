@@ -40,12 +40,17 @@ function procesarTransferencias() {
       if (from.indexOf('santander') > -1)      data = parseSantander(body);
       else if (from.indexOf('bancochile') > -1) data = parseChile(body);
       else if (from.indexOf('ripley') > -1)     data = parseRipley(body);
-      if (!data || !data.amount) return;
+      if (!data) return;
 
-      UrlFetchApp.fetch(ENDPOINT, {
-        method: 'post', contentType: 'application/json',
-        headers: { 'x-ingest-secret': SECRET },
-        payload: JSON.stringify(data), muteHttpExceptions: true,
+      // Un parser puede devolver varios items (ej: "Comprobante de pago" con N cuentas pagadas)
+      const items = Array.isArray(data) ? data : [data];
+      items.forEach(d => {
+        if (!d || !d.amount) return;
+        UrlFetchApp.fetch(ENDPOINT, {
+          method: 'post', contentType: 'application/json',
+          headers: { 'x-ingest-secret': SECRET },
+          payload: JSON.stringify(d), muteHttpExceptions: true,
+        });
       });
     });
     thread.addLabel(label);
@@ -79,7 +84,33 @@ function parseSantander(txt) {
 }
 
 // ── Banco de Chile ─────────────────────────────────────────
+const MESES_ES = { enero:'01', febrero:'02', marzo:'03', abril:'04', mayo:'05', junio:'06',
+                   julio:'07', agosto:'08', septiembre:'09', octubre:'10', noviembre:'11', diciembre:'12' };
+
+// dd/mm/yyyy directo, o fecha larga "viernes 03 de julio de 2026" -> "03/07/2026"
+function fechaChile(txt) {
+  const dmy = g(/(\d{1,2}\/\d{1,2}\/\d{4})/, txt);
+  if (dmy) return dmy;
+  const m = txt.match(/(\d{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+(\d{4})/i);
+  if (m && MESES_ES[m[2].toLowerCase()]) return m[1] + '/' + MESES_ES[m[2].toLowerCase()] + '/' + m[3];
+  return '';
+}
+
+const BANCOS = ['Banco Ripley','BancoEstado','Banco Estado','Banco Santander','Banco de Chile',
+  'Banco Falabella','Banco BCI','Banco Itaú','Banco Itau','Banco Security','Banco Consorcio',
+  'Banco Bice','Banco Internacional','Scotiabank','Santander','BCI','Coopeuch','Copeuch',
+  'Mercado Pago','MercadoPago','Tenpo'];
+function bancoEn(blk) {
+  const low = blk.toLowerCase();
+  for (const b of BANCOS) if (low.indexOf(b.toLowerCase()) > -1) return b;
+  return '';
+}
+
 function parseChile(txt) {
+  // Plantilla "Comprobante de pago" (pago de cuentas de servicio, N items por mail)
+  if (/Resumen de Cuentas Pagadas/i.test(txt) || /Pago de tu\(?s\)? Cuenta/i.test(txt)) return parseChilePagoCuentas(txt);
+  // Plantilla "Comprobante de Transferencia a terceros" (bloques Origen / Destino)
+  if (/Transferencia a terceros/i.test(txt)) return parseChileTerceros(txt);
   const idxDest = txt.search(/Datos\s+de\s+la\s+Transferencia/i);
   const dBlk = txt.search(/Datos\s+del\s+Destinatario/i) > -1
     ? txt.slice(txt.search(/Datos\s+del\s+Destinatario/i), idxDest > -1 ? idxDest : undefined) : txt;
@@ -87,7 +118,7 @@ function parseChile(txt) {
   const txBlk = idxDest > -1 ? txt.slice(idxDest) : '';
   return {
     amount:        money(txt, /Monto[^$]*\$\s*([\d.]+)/i),
-    date:          g(/(\d{1,2}\/\d{1,2}\/\d{4})/, txt),
+    date:          fechaChile(txt),
     originMine:    true, // "usted ha efectuado una transferencia ... desde su Cuenta Corriente"
     originAccount: g(/desde su Cuenta Corriente\s*([\d.\-]+)/i, txt) || g(/Cuenta[:\s]*([\d.\-]{6,})/i, txBlk),
     originBank:    'Banco de Chile',
@@ -95,7 +126,69 @@ function parseChile(txt) {
     destRut:       g(/Rut[:\s]*([\dkK.\-]+)/i, dBlk),
     destAccount:   g(/Cuenta[:\s]*([\d.\-]+)/i, dBlk),
     destBank:      g(/Banco[:\s]*([^\n\r]+)/i, dBlk),
-    txnId:         g(/ID[:\s]*([A-Z0-9_]+)/i, txt),
+    txnId:         g(/\bID[:\s]+([A-Z0-9_]{6,})/, txt),
+    comment:       g(/Mensaje[:\s]*([^\n\r]+)/i, txt),
+  };
+}
+
+// Plantilla "Comprobante de pago" (pago de N cuentas de servicio por la web del Chile).
+// Bloques secuenciales: Empresa -> Identificador de la Cuenta -> Monto (uno por servicio).
+// Devuelve un ARRAY de payloads kind:'pago_servicio' (uno por cuenta pagada).
+function parseChilePagoCuentas(txt) {
+  const date = fechaChile(txt);
+  const originAccount = g(/Cuenta de Cargo[^\d]*([\d.\-]+)/i, txt);
+  const items = [];
+  const re = /Empresa[ \t]*[\r\n]*[ \t]*([^\n\r]+)[\s\S]*?Identificador de la Cuenta[ \t]*[\r\n]*[ \t]*([\dkK.\-]+)[\s\S]*?Monto[^$]*\$\s*([\d.]+)/gi;
+  let m;
+  while ((m = re.exec(txt)) !== null) {
+    items.push({
+      kind: 'pago_servicio',
+      empresa: m[1].trim(),
+      identificador: m[2].trim(),
+      amount: m[3].replace(/\./g, ''),
+      date: date,
+      originAccount: originAccount,
+    });
+  }
+  return items;
+}
+
+// Plantilla "Comprobante de Transferencia a terceros".
+// OJO: el orden etiqueta/valor del correo varía según el render, así que se extrae por
+// PATRÓN dentro de cada bloque (Origen / Destino), no por posición de la etiqueta.
+function parseChileTerceros(txt) {
+  const iOri = txt.search(/\bOrigen\b/i);
+  const iDes = txt.search(/\bDestino\b/i);
+  const iMon = txt.search(/\bMonto\b/i);
+  const oBlk = iOri > -1 && iDes > iOri ? txt.slice(iOri, iDes) : '';
+  const dBlk = iDes > -1 ? txt.slice(iDes, iMon > iDes ? iMon : txt.length) : '';
+
+  const destRut = g(/(\d{1,2}\.?\d{3}\.?\d{3}\s*-\s*[\dkK])\b/, dBlk);
+  const dSinRut = destRut ? dBlk.replace(destRut, ' ') : dBlk;
+  // Cuenta: formato Chile con guiones (00-164-23770-04) o corrida de 9-14 dígitos
+  const cuenta = (blk) => g(/(\d{2}-\d{3}-\d{5}-\d{2})/, blk) || g(/\b(\d{9,14})\b/, blk);
+  // Nombre: etiqueta con valor en la misma línea, o línea suelta que parece nombre de persona
+  let destName = g(/Nombre y Apellido[: \t]*([A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}(?:[ \t]+[A-Za-zÁÉÍÓÚÑáéíóúñ]{2,})+)/, dBlk);
+  if (!destName) {
+    for (const raw of dBlk.split(/[\r\n]+/)) {
+      const L = raw.replace(/^Destino\s*/i, '').trim();
+      if (/^[A-Za-zÁÉÍÓÚÑáéíóúñ ]{5,60}$/.test(L) && L.split(/\s+/).length >= 2 &&
+          !/cuenta|banco|rut|tipo|email|origen|nombre|apellido|corriente|vista|ahorro|transferencia/i.test(L)) {
+        destName = L; break;
+      }
+    }
+  }
+  return {
+    amount:        money(txt, /Monto[^$]*\$\s*([\d.]+)/i),
+    date:          fechaChile(txt),
+    originMine:    true,
+    originAccount: cuenta(oBlk),
+    originBank:    'Banco de Chile',
+    destName:      destName,
+    destRut:       destRut,
+    destAccount:   cuenta(dSinRut),
+    destBank:      bancoEn(dBlk),
+    txnId:         g(/Transacci[óo]n[\s:]*[\r\n]*\s*([A-Z0-9]{10,})/i, txt) || g(/\bID[:\s]+([A-Z0-9_]{6,})/, txt),
     comment:       g(/Mensaje[:\s]*([^\n\r]+)/i, txt),
   };
 }
