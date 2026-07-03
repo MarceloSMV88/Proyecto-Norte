@@ -62,7 +62,8 @@ export default function MovimientosPage() {
     return true
   })
 
-  const income = filtered.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0)
+  // Solo ingresos reales: las patas + de una transferencia interna no son ingreso
+  const income = filtered.filter(t => t.type === 'ingreso' && t.amount > 0).reduce((s, t) => s + t.amount, 0)
   const expense = filtered.filter(t => t.amount < 0 && t.type === 'gasto').reduce((s, t) => s + Math.abs(t.amount), 0)
 
   // Group by date
@@ -80,7 +81,7 @@ export default function MovimientosPage() {
       <div className="scroll">
 
         {/* Stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 'var(--gap)', width: '100%', maxWidth: 1152, margin: '0 auto' }}>
+        <div className="stats-3" style={{ maxWidth: 1152, margin: '0 auto' }}>
           {[['Ingresos', income, 'var(--ok)'], ['Gastos', expense, 'var(--warn)'], ['Balance', income - expense, income - expense >= 0 ? 'var(--ok)' : 'var(--danger)']].map(([l, v, c]) => (
             <div key={l as string} className="card" style={{ padding: 16 }}>
               <div style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>{l as string}</div>

@@ -5,6 +5,7 @@ import { ProfileProvider } from '@/contexts/ProfileContext'
 import { ThemeProvider } from '@/contexts/ThemeContext'
 import { ToastProvider } from '@/components/ui/Toast'
 import Sidebar from '@/components/layout/Sidebar'
+import MobileNav from '@/components/layout/MobileNav'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -21,6 +22,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <div className="main">
                 {children}
               </div>
+              <MobileNav />
             </div>
           </ToastProvider>
         </ProfileProvider>

@@ -109,8 +109,9 @@ export default function CuentasPage() {
                             {debt > 0 ? '−' : ''}{clp(debt)}
                           </div>
                           <div className="acc-foot">
-                            Deuda · Disponible <b style={{ color: 'var(--ok)' }}>{clp(available)}</b>
-                            {limit > 0 && <span style={{ color: 'var(--text-faint)' }}> de {clp(limit)}</span>}
+                            {limit > 0
+                              ? <>Deuda · Disponible <b style={{ color: 'var(--ok)' }}>{clp(available)}</b><span style={{ color: 'var(--text-faint)' }}> de {clp(limit)}</span></>
+                              : <>Deuda · <span style={{ color: 'var(--text-faint)' }}>cupo sin definir</span></>}
                           </div>
                           {limit > 0 && (
                             <div className="progress-track" style={{ marginTop: 8 }}>

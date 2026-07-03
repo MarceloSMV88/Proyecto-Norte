@@ -6,7 +6,7 @@ import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
 import ProgressRing from '@/components/charts/ProgressRing'
 import GoalModal from '@/components/modals/GoalModal'
-import { clp, clpShort, getCurrentMonth } from '@/lib/utils'
+import { clp, clpShort } from '@/lib/utils'
 import type { Goal } from '@/lib/types'
 
 const COLOR_HEX: Record<string, string> = {
@@ -16,7 +16,6 @@ const COLOR_HEX: Record<string, string> = {
 export default function MetasPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
-  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
   const [goals, setGoals] = useState<Goal[]>([])
   const [showModal, setShowModal] = useState(false)
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null)
@@ -47,12 +46,13 @@ export default function MetasPage() {
 
   return (
     <div>
-      <Topbar title="Metas" month={selectedMonth} onMonthChange={setSelectedMonth} action={{ label: 'Nueva meta', onClick: () => setShowModal(true) }} />
+      {/* Las metas no dependen del mes: sin selector de mes */}
+      <Topbar title="Metas" action={{ label: 'Nueva meta', onClick: () => setShowModal(true) }} />
 
       <div className="scroll">
 
         {/* Stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 'var(--gap)' }}>
+        <div className="stats-3">
           {[['Ahorrado', totalSaved, 'var(--ok)'], ['Objetivo total', totalTarget, 'var(--text)'], ['Aporte mensual', totalMonthly, 'var(--accent)']].map(([l, v, c]) => (
             <div key={l as string} className="card" style={{ padding: 16 }}>
               <div style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>{l as string}</div>

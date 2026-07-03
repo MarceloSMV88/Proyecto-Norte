@@ -42,12 +42,14 @@ export function computeSummary(
   const spentTotal = categories.reduce((s, c) => s + c.spent, 0)
   const unassigned = income - assignedTotal
   const available = accounts.filter(a => a.type === 'Cuenta').reduce((s, a) => s + a.balance, 0)
+  // Dinero repartible = saldo en cuentas corrientes; el ahorro es de las metas y las TC son deuda
+  const unassignedFunds = available - assignedTotal
   const savings = accounts.filter(a => a.type === 'Ahorro').reduce((s, a) => s + a.balance, 0)
   const variableAssigned = categories.filter(c => !c.fixed).reduce((s, c) => s + c.assigned, 0)
   const variableSpent = categories.filter(c => !c.fixed).reduce((s, c) => s + c.spent, 0)
   const safeToday = Math.max(0, Math.round((variableAssigned - variableSpent) / daysLeft / 100) * 100)
 
-  return { income, assignedTotal, spentTotal, unassigned, available, savings, safeToday, daysLeft, variableAssigned, variableSpent }
+  return { income, assignedTotal, spentTotal, unassigned, unassignedFunds, available, savings, safeToday, daysLeft, variableAssigned, variableSpent }
 }
 
 export function getDaysLeftInMonth(): number {

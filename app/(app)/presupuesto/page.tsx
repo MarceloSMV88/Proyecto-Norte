@@ -65,9 +65,9 @@ export default function PresupuestoPage() {
       <div className="scroll">
 
         {/* Banner listo para asignar + gráficos */}
-        <div className="card" style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 300px) 1fr 1fr', gap: 28, alignItems: 'center' }}>
+        <div className="card assign-banner">
           {/* Listo para asignar */}
-          <div style={{ borderRight: '1px solid var(--hairline)', paddingRight: 24, alignSelf: 'stretch', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <div className="assign-left">
             <div style={{ fontSize: 12, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', marginBottom: 4 }}>
               {unassigned === 0 ? '✓ Todo asignado' : unassigned > 0 ? 'Listo para asignar' : 'Asignado de más'}
             </div>
@@ -95,7 +95,7 @@ export default function PresupuestoPage() {
           // Asignado vs fondos en cuentas: rojo si asignaste más de lo que tienes, verde si calza exacto, neutro si aún queda por asignar
           const assignedColor = summary.assignedTotal > fundsAvailable ? 'var(--danger)' : summary.assignedTotal === fundsAvailable && fundsAvailable > 0 ? 'var(--ok)' : 'var(--text-2)'
           return (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 'var(--gap)' }}>
+        <div className="stats-4">
           {[
             ['En cuentas', fundsAvailable, 'var(--text)'],
             ['Asignado', summary.assignedTotal, assignedColor],
@@ -121,9 +121,9 @@ export default function PresupuestoPage() {
 
           return (
             <div key={group} className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, paddingBottom: 12, borderBottom: '1px solid var(--hairline)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 14, paddingBottom: 12, borderBottom: '1px solid var(--hairline)' }}>
                 <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 14 }}>{group}</span>
-                <div style={{ display: 'flex', gap: 20, alignItems: 'center', fontSize: 12, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)' }}>
+                <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)' }}>
                   <span>Asignado {clp(subtotalAssigned)}</span>
                   <span>Gastado {clp(subtotalSpent)}</span>
                   <span style={{ color: subtotalAssigned - subtotalSpent < 0 ? 'var(--danger)' : subtotalAssigned > 0 && subtotalSpent / subtotalAssigned > 0.88 ? 'var(--warn)' : 'var(--ok)' }}>
@@ -148,9 +148,9 @@ export default function PresupuestoPage() {
               ) : (
                 <>
               {/* Header row */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px 36px 1fr 90px 32px', gap: 12, padding: '0 8px 8px', borderBottom: '1px solid var(--hairline)' }}>
+              <div className="bcat-grid" style={{ padding: '0 8px 8px', borderBottom: '1px solid var(--hairline)' }}>
                 {['Categoría', 'Asignado', '', 'Gastado / Disponible', 'Disponible', ''].map((h, i) => (
-                  <span key={i} style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '.4px', textAlign: (i === 1 || i === 4) ? 'right' : 'left' }}>{h}</span>
+                  <span key={i} className={i === 2 ? 'bcat-sp' : i === 3 ? 'bcat-prog' : undefined} style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '.4px', textAlign: (i === 1 || i === 4) ? 'right' : 'left' }}>{h}</span>
                 ))}
               </div>
 
@@ -161,7 +161,7 @@ export default function PresupuestoPage() {
                   const disp = cat.assigned - cat.spent
 
                   return (
-                    <div key={cat.id} className="bcat-row" style={{ display: 'grid', gridTemplateColumns: '1fr 110px 36px 1fr 90px 32px', gap: 12, padding: '10px 8px', borderRadius: 10, alignItems: 'center', transition: 'background .15s' }}
+                    <div key={cat.id} className="bcat-row bcat-grid" style={{ padding: '10px 8px', borderRadius: 10, transition: 'background .15s' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                     >
@@ -195,9 +195,9 @@ export default function PresupuestoPage() {
                         </button>
                       )}
 
-                      <span />
+                      <span className="bcat-sp" />
 
-                      <div>
+                      <div className="bcat-prog">
                         <div className="progress-track" style={{ marginBottom: 3 }}>
                           <div className="progress-fill" style={{ width: `${Math.min(100, pct * 100)}%`, background: status }} />
                         </div>
@@ -223,13 +223,13 @@ export default function PresupuestoPage() {
               </div>
 
               {/* Subtotal de la sección */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px 36px 1fr 90px 32px', gap: 12, padding: '12px 8px 2px', marginTop: 4, borderTop: '1px solid var(--hairline)', alignItems: 'center' }}>
+              <div className="bcat-grid" style={{ padding: '12px 8px 2px', marginTop: 4, borderTop: '1px solid var(--hairline)' }}>
                 <span style={{ fontSize: 11.5, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '.4px' }}>
                   Subtotal · {cats.length} {cats.length === 1 ? 'categoría' : 'categorías'}
                 </span>
                 <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-ui)', color: 'var(--text)', textAlign: 'right', paddingRight: 10 }}>{clp(subtotalAssigned)}</span>
-                <span />
-                <span style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>{clp(subtotalSpent)} gastado</span>
+                <span className="bcat-sp" />
+                <span className="bcat-prog" style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>{clp(subtotalSpent)} gastado</span>
                 <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-ui)', color: subtotalAssigned - subtotalSpent < 0 ? 'var(--danger)' : 'var(--ok)', textAlign: 'right' }}>
                   {clp(subtotalAssigned - subtotalSpent)}
                 </span>

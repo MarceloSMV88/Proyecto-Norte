@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
 import BarPairs from '@/components/charts/BarPairs'
-import { clp, clpShort, computeSummary, getDaysLeftInMonth, getCurrentMonth, todayCL } from '@/lib/utils'
+import { clp, clpShort, computeSummary, formatDate, getDaysLeftInMonth, getCurrentMonth, todayCL } from '@/lib/utils'
 import { catEmoji } from '@/lib/icons'
 import type { Category, Account, Goal, Transaction, Upcoming, MonthlyBar } from '@/lib/types'
 import TransactionModal from '@/components/modals/TransactionModal'
@@ -64,8 +64,9 @@ export default function ResumenPage() {
     for (const tx of allTxs6m as Transaction[]) {
       const m = tx.date.slice(0, 7)
       if (!byMonth[m]) byMonth[m] = { income: 0, expense: 0 }
-      if (tx.amount > 0) byMonth[m].income += tx.amount
-      else if (tx.type === 'gasto') byMonth[m].expense += Math.abs(tx.amount)
+      // Solo ingresos reales: las patas + de una transferencia interna no son ingreso
+      if (tx.type === 'ingreso' && tx.amount > 0) byMonth[m].income += tx.amount
+      else if (tx.type === 'gasto' && tx.amount < 0) byMonth[m].expense += Math.abs(tx.amount)
     }
     const curMonth = selectedMonth.slice(0, 7)
     const bars = Object.entries(byMonth).slice(-6).map(([m, v]) => ({
@@ -94,19 +95,32 @@ export default function ResumenPage() {
   const gaugeC = 2 * Math.PI * gaugeR
   const gaugeDash = (varPct / 100) * gaugeC
 
-  // Pace bar
-  const spentToday = transactions
-    .filter(t => t.date === todayCL(0) && t.type === 'gasto')
-    .reduce((a, t) => a + Math.abs(t.amount), 0)
-  const pacePct = s.safeToday > 0 ? Math.min(100, (spentToday / (s.safeToday * 1.6)) * 100) : 0
-  const markerPct = s.safeToday > 0 ? (s.safeToday / (s.safeToday * 1.6)) * 100 : 62
+  // Ritmo del mes: la barra es el presupuesto variable completo; el relleno es lo gastado
+  // y el marcador "hoy" es la fracción del mes transcurrida. Si el relleno pasa al
+  // marcador, estás gastando más rápido que el ritmo ideal.
+  const dayOfMonth = isCurrentMonth ? Number(todayCL(0).slice(8, 10)) : totalDays
+  const monthProgress = dayOfMonth / totalDays
+  const idealToDate = Math.round(s.variableAssigned * monthProgress)
+  const pacePct = s.variableAssigned > 0 ? Math.min(100, (s.variableSpent / s.variableAssigned) * 100) : 0
+  const markerPct = Math.min(98, Math.max(2, monthProgress * 100))
+  const paceState: 'ok' | 'warn' | 'over' | null = s.variableAssigned <= 0 ? null
+    : s.variableSpent > s.variableAssigned ? 'over'
+    : s.variableSpent > idealToDate * 1.05 ? 'warn'
+    : 'ok'
+  const paceColor = paceState === 'over' ? 'var(--danger)' : paceState === 'warn' ? 'var(--warn)' : undefined
+  const subtitle = !isCurrentMonth
+    ? `Resumen de ${monthName}.`
+    : paceState === null ? 'Asigna tu presupuesto para empezar a medir tu ritmo.'
+    : paceState === 'ok' ? 'Vas a buen ritmo este mes. Esto es lo que importa hoy.'
+    : paceState === 'warn' ? 'Estás gastando más rápido que el ritmo ideal del mes.'
+    : 'Tu presupuesto variable ya se excedió este mes.'
 
-  // Spark for stat cards
+  // Spark for stat cards: gasto acumulado por día del MES SELECCIONADO
   const dailyFlow: number[] = []
   let cum = 0
-  const now = new Date()
-  for (let i = 1; i <= now.getDate(); i++) {
-    const d = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`
+  const ym = selectedMonth.slice(0, 7)
+  for (let i = 1; i <= dayOfMonth; i++) {
+    const d = `${ym}-${String(i).padStart(2, '0')}`
     cum += transactions.filter(t => t.date === d && t.type === 'gasto').reduce((a, t) => a + Math.abs(t.amount), 0)
     dailyFlow.push(cum)
   }
@@ -122,7 +136,7 @@ export default function ResumenPage() {
 
   return (
     <>
-      <Topbar title={`Hola, ${activeProfile.name}`} subtitle="Vas bien este mes. Esto es lo que importa hoy." month={selectedMonth} onMonthChange={m => { setSelectedMonth(m); setExpandedCat(null) }} />
+      <Topbar title={`Hola, ${activeProfile.name}`} subtitle={subtitle} month={selectedMonth} onMonthChange={m => { setSelectedMonth(m); setExpandedCat(null) }} />
       <div className="scroll">
 
         {/* ── Hero ── */}
@@ -133,7 +147,11 @@ export default function ResumenPage() {
                 <span className="dot" />
                 {isCurrentMonth ? 'Disponible para gastar hoy' : `Disponible variable · ${monthName}`}
               </span>
-              {isCurrentMonth && <span className="hero-chip">✦ Ritmo saludable</span>}
+              {isCurrentMonth && paceState && (
+                <span className={`hero-chip${paceState === 'warn' ? ' chip-warn' : paceState === 'over' ? ' chip-danger' : ''}`}>
+                  {paceState === 'ok' ? '✦ Ritmo saludable' : paceState === 'warn' ? '⚠ Sobre el ritmo' : '⚠ Presupuesto excedido'}
+                </span>
+              )}
             </div>
             <div className="hero-amount">{clp(isCurrentMonth ? s.safeToday : s.variableAssigned - s.variableSpent)}</div>
             {isCurrentMonth ? (
@@ -146,15 +164,15 @@ export default function ResumenPage() {
                 Presupuesto variable de <b style={{ textTransform: 'capitalize' }}>{monthName}</b>: <b>{clp(s.variableSpent)}</b> gastado de <b>{clp(s.variableAssigned)}</b> asignado.
               </p>
             )}
-            {isCurrentMonth && (
+            {isCurrentMonth && paceState && (
             <div className="pace">
               <div className="pace-bar">
-                <div className="pace-fill" style={{ width: `${pacePct}%` }} />
+                <div className="pace-fill" style={{ width: `${pacePct}%`, ...(paceColor ? { background: paceColor } : {}) }} />
                 <div className="pace-marker" style={{ left: `${markerPct}%` }}><span>hoy</span></div>
               </div>
               <div className="pace-legend">
-                <span>Gastado hoy <b>{clp(spentToday)}</b></span>
-                <span>Recomendado <b>{clp(s.safeToday)}</b></span>
+                <span>Gastado <b>{clp(s.variableSpent)}</b> de <b>{clp(s.variableAssigned)}</b></span>
+                <span>Ritmo ideal a hoy <b>{clp(idealToDate)}</b></span>
               </div>
             </div>
             )}
@@ -188,11 +206,11 @@ export default function ResumenPage() {
               </div>
             </div>
             <div className="hero-side-rows">
-              <div><span className="hsr-l">Ingreso del mes</span><span className="hsr-v">{clp(s.income)}</span></div>
+              <div><span className="hsr-l">En cuentas</span><span className="hsr-v">{clp(s.available)}</span></div>
               <div><span className="hsr-l">Asignado</span><span className="hsr-v">{clp(s.assignedTotal)}</span></div>
               <div>
-                <span className="hsr-l">Libre por asignar</span>
-                <span className={`hsr-v ${s.unassigned === 0 ? 'ok' : s.unassigned < 0 ? 'warn' : ''}`}>{clp(s.unassigned)}</span>
+                <span className="hsr-l">Listo para asignar</span>
+                <span className={`hsr-v ${s.unassignedFunds === 0 ? 'ok' : s.unassignedFunds < 0 ? 'warn' : ''}`}>{clp(s.unassignedFunds)}</span>
               </div>
             </div>
           </div>
@@ -202,17 +220,15 @@ export default function ResumenPage() {
         {(() => {
           const spentPct = s.assignedTotal > 0 ? s.spentTotal / s.assignedTotal : 0
           const spentTone = s.spentTotal > s.assignedTotal ? 'red' : spentPct > 0.88 ? 'warn' : ''
-          const freeUnassigned = s.unassigned
-          const freeTone = freeUnassigned < 0 ? 'red' : freeUnassigned === 0 ? 'ok' : ''
+          const freeTone = s.unassignedFunds < 0 ? 'red' : s.unassignedFunds === 0 ? 'ok' : ''
           const invertedFlow = dailyFlow.length > 1 ? dailyFlow.map((_, i, a) => a[a.length - 1] - a[i]) : []
-          const savingsFlat = dailyFlow.length > 0 ? dailyFlow.map(() => s.savings) : []
           return (
         <div className="stat-row">
           {[
-            { label: 'Saldo disponible',  value: s.available,   spark: invertedFlow,  sparkColor: 'var(--ok)' },
-            { label: 'Gastos del mes',    value: s.spentTotal,  spark: dailyFlow,      sparkColor: 'var(--warn)', tone: spentTone },
-            { label: 'Ahorro acumulado',  value: s.savings,     spark: savingsFlat,    sparkColor: 'var(--c-violet)', tone: s.savings > 0 ? 'ok' : '' },
-            { label: 'Libre por asignar', value: s.unassigned,  spark: [] as number[], sparkColor: 'var(--c-blue)', tone: freeTone },
+            { label: 'Saldo disponible',   value: s.available,       spark: invertedFlow,   sparkColor: 'var(--ok)' },
+            { label: 'Gastos del mes',     value: s.spentTotal,      spark: dailyFlow,      sparkColor: 'var(--warn)', tone: spentTone },
+            { label: 'Ahorro acumulado',   value: s.savings,         spark: [] as number[], sparkColor: 'var(--c-violet)', tone: s.savings > 0 ? 'ok' : '' },
+            { label: 'Listo para asignar', value: s.unassignedFunds, spark: [] as number[], sparkColor: 'var(--c-blue)', tone: freeTone },
           ].map(({ label, value, spark, sparkColor, tone }) => (
             <div key={label} className="card stat">
               <div className="stat-top">
@@ -235,7 +251,7 @@ export default function ResumenPage() {
 
           {/* Columna izquierda */}
           <div className="col-main">
-            <FlowCard dailyFlow={dailyFlow} totalDays={totalDays} s={s} months={months} />
+            <FlowCard dailyFlow={dailyFlow} totalDays={totalDays} s={s} months={months} idealToDate={idealToDate} />
 
             {/* Presupuesto por categorías */}
             <div className="card budget">
@@ -284,7 +300,7 @@ export default function ResumenPage() {
                             {catTxs.length ? catTxs.slice(0, 4).map(t => (
                               <div className="dtx" key={t.id}>
                                 <span className="dtx-name">{t.name}</span>
-                                <span className="dtx-date">{t.date}</span>
+                                <span className="dtx-date">{formatDate(t.date)}</span>
                                 <span className="dtx-amt">{clp(Math.abs(t.amount))}</span>
                               </div>
                             )) : <span className="dtx-empty">Sin movimientos este mes</span>}
@@ -356,7 +372,8 @@ export default function ResumenPage() {
                 </div>
                 <div className="up-list">
                   {upcoming.map(u => {
-                    const daysUntil = Math.ceil((new Date(u.due_date).getTime() - Date.now()) / 86400000)
+                    // Comparación por fecha calendario de Chile (parsear a mediodía evita el corrimiento UTC)
+                    const daysUntil = Math.round((new Date(u.due_date.slice(0, 10) + 'T12:00:00').getTime() - new Date(todayCL(0) + 'T12:00:00').getTime()) / 86400000)
                     return (
                       <div key={u.id} className="up-row">
                         <span className={`up-day${daysUntil <= 1 ? ' soon' : ''}`}>
@@ -418,13 +435,15 @@ export default function ResumenPage() {
   )
 }
 
-function FlowCard({ dailyFlow, totalDays, s, months }: {
+function FlowCard({ dailyFlow, totalDays, s, months, idealToDate }: {
   dailyFlow: number[]; totalDays: number
   s: ReturnType<typeof import('@/lib/utils').computeSummary>
   months: MonthlyBar[]
+  idealToDate: number
 }) {
   const [tab, setTab] = useState<'mes' | '6m'>('mes')
-  const diff = s.variableAssigned - s.variableSpent
+  // Comparación contra el ritmo ideal A LA FECHA (no contra el total del mes)
+  const diff = idealToDate - s.variableSpent
 
   return (
     <div className="card flow">
@@ -495,7 +514,8 @@ function AreaTrend({ flow, totalDays, max }: { flow: number[]; totalDays: number
   const px = (i: number, len: number) => (i / Math.max(len - 1, 1)) * w
 
   const area = flow.map((v, i) => `${px(i, flow.length)},${py(v)}`).join(' ')
-  const pace = Array.from({ length: flow.length }, (_, i) => `${px(i, flow.length)},${py((i / totalDays) * max)}`).join(' ')
+  // El índice i es el día i+1 del mes: el ritmo ideal al día d es (d/totalDays)·presupuesto
+  const pace = Array.from({ length: flow.length }, (_, i) => `${px(i, flow.length)},${py(((i + 1) / totalDays) * max)}`).join(' ')
 
   return (
     <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height: h }} preserveAspectRatio="none">

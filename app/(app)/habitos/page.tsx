@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
 import BarPairs from '@/components/charts/BarPairs'
-import { clp, clpShort, getCurrentMonth } from '@/lib/utils'
+import { clp, clpShort, getCurrentMonth, todayCL } from '@/lib/utils'
 import type { Category, Subscription, Transaction, MonthlyBar } from '@/lib/types'
 
 const USAGE_COLOR = { alto: 'var(--ok)', medio: 'var(--warn)', bajo: 'var(--danger)' } as const
@@ -35,11 +35,13 @@ export default function HabitosPage() {
     for (const tx of (txs.data || []) as Transaction[]) {
       const m = tx.date.slice(0, 7)
       if (!byMonth[m]) byMonth[m] = { income: 0, expense: 0 }
-      if (tx.amount > 0) byMonth[m].income += tx.amount
-      else if (tx.type === 'gasto') byMonth[m].expense += Math.abs(tx.amount)
+      // Solo ingresos reales: las patas + de una transferencia interna no son ingreso
+      if (tx.type === 'ingreso' && tx.amount > 0) byMonth[m].income += tx.amount
+      else if (tx.type === 'gasto' && tx.amount < 0) byMonth[m].expense += Math.abs(tx.amount)
     }
     const bars = Object.entries(byMonth).slice(-6).map(([m, v]) => ({
-      m: new Date(m + '-01').toLocaleString('es-CL', { month: 'short' }),
+      // '-15' evita que el parseo UTC corra el mes un día hacia atrás en Chile
+      m: new Date(m + '-15').toLocaleString('es-CL', { month: 'short' }),
       income: v.income, expense: v.expense,
       partial: m === month.slice(0, 7),
     }))
@@ -51,12 +53,22 @@ export default function HabitosPage() {
   if (!activeProfile) return null
 
   const spentTotal = categories.reduce((s, c) => s + c.spent, 0)
+  const assignedTotal = categories.reduce((s, c) => s + c.assigned, 0)
   const subsTotal = subscriptions.reduce((s, s2) => s + s2.amount, 0)
   const unusedSubs = subscriptions.filter(s => s.used === 'bajo')
   const unusedAmount = unusedSubs.reduce((s, s2) => s + s2.amount, 0)
-  const topCats = [...categories].sort((a, b) => b.spent - a.spent).slice(0, 6)
-  const avgDaily = categories.length > 0 ? Math.round(spentTotal / new Date().getDate()) : 0
-  const projectedEnd = Math.round(spentTotal * (30 / new Date().getDate()))
+  const topCats = [...categories].filter(c => c.spent > 0).sort((a, b) => b.spent - a.spent).slice(0, 6)
+
+  // Días del mes seleccionado: si es el mes actual, los transcurridos; si es pasado, todos
+  const isCurrentMonth = selectedMonth.slice(0, 7) === todayCL(0).slice(0, 7)
+  const selDate = new Date(selectedMonth + 'T12:00:00')
+  const totalDays = new Date(selDate.getFullYear(), selDate.getMonth() + 1, 0).getDate()
+  const elapsedDays = isCurrentMonth ? Number(todayCL(0).slice(8, 10)) : totalDays
+  const monthName = selDate.toLocaleString('es-CL', { month: 'long' })
+  const avgDaily = spentTotal > 0 ? Math.round(spentTotal / elapsedDays) : 0
+  const projectedEnd = isCurrentMonth ? Math.round((spentTotal / elapsedDays) * totalDays) : spentTotal
+  // Semáforo contra el presupuesto del mes (no contra el ingreso, que puede no estar cargado)
+  const projTone = assignedTotal > 0 && projectedEnd > assignedTotal ? 'var(--danger)' : 'var(--ok)'
 
   const leaks = [
     ...categories.filter(c => c.spent > c.assigned && c.assigned > 0).map(c => ({
@@ -89,23 +101,29 @@ export default function HabitosPage() {
           <div className="card insight-card accent-tint">
             <div className="insight-eyebrow">✦ Resumen</div>
             <p className="insight-text">
-              Gastas en promedio <b>{clp(avgDaily)}</b> al día.
-              Proyección fin de mes: <b style={{ color: projectedEnd > activeProfile.income ? 'var(--danger)' : 'var(--ok)' }}>{clp(projectedEnd)}</b>.
+              {isCurrentMonth
+                ? <>Gastas en promedio <b>{clp(avgDaily)}</b> al día ({elapsedDays} {elapsedDays === 1 ? 'día' : 'días'} del mes).</>
+                : <>En <b style={{ textTransform: 'capitalize' }}>{monthName}</b> gastaste en promedio <b>{clp(avgDaily)}</b> al día.</>}
+              {assignedTotal > 0 && <> Presupuesto del mes: <b>{clp(assignedTotal)}</b>.</>}
             </p>
           </div>
 
+          {subscriptions.length > 0 && (
           <div className="card insight-card">
             <div className="insight-eyebrow" style={{ color: 'var(--c-violet)' }}>↻ Suscripciones</div>
             <p className="insight-text">
-              <b>{clp(subsTotal)}</b> al mes en {subscriptions.length} servicios.
+              <b>{clp(subsTotal)}</b> al mes en {subscriptions.length} {subscriptions.length === 1 ? 'servicio' : 'servicios'}.
               {unusedAmount > 0 && <> <b style={{ color: 'var(--warn)' }}>{clp(unusedAmount)}</b> en suscripciones con bajo uso.</>}
             </p>
           </div>
+          )}
 
           <div className="card insight-card">
-            <div className="insight-eyebrow">↗ Proyección fin de mes</div>
+            <div className="insight-eyebrow">↗ {isCurrentMonth ? 'Proyección fin de mes' : 'Cierre del mes'}</div>
             <p className="insight-text">
-              Si sigues así, cerrarás el mes en <b style={{ color: projectedEnd > activeProfile.income ? 'var(--danger)' : 'var(--ok)' }}>{clp(projectedEnd)}</b> de gasto.
+              {isCurrentMonth
+                ? <>Si sigues así, cerrarás el mes en <b style={{ color: projTone }}>{clp(projectedEnd)}</b> de gasto.</>
+                : <>Cerraste <b style={{ textTransform: 'capitalize' }}>{monthName}</b> con <b style={{ color: projTone }}>{clp(projectedEnd)}</b> de gasto.</>}
               {leaksTotal > 0 && <> Recorte potencial: <b className="ok">{clp(leaksTotal)}</b>.</>}
             </p>
           </div>

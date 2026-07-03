@@ -24,7 +24,7 @@ const DENSITY_OPTS: { key: Density; label: string }[] = [
 ]
 
 export default function AjustesPage() {
-  const { user, profile, isAdmin, isSuperAdmin } = useAuth()
+  const { user, profile, isAdmin, isSuperAdmin, signOut } = useAuth()
   const { profiles, activeProfile, refreshProfiles } = useProfiles()
   const { theme, accent, density, setTheme, setAccent, setDensity } = useTheme()
   const { showToast } = useToast()
@@ -196,6 +196,10 @@ export default function AjustesPage() {
               <span>Email de cuenta</span>
               <span style={{ fontWeight: 600, color: 'var(--text)', fontFamily: 'var(--font-ui)' }}>{user?.email}</span>
             </div>
+            <button onClick={signOut}
+              style={{ marginTop: 6, width: '100%', padding: '11px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--danger)', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13.5, cursor: 'pointer' }}>
+              Cerrar sesión
+            </button>
           </div>
         </div>
 
