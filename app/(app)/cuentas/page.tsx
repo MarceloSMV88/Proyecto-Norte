@@ -11,7 +11,7 @@ import type { Account, AccountType } from '@/lib/types'
 const ACCOUNT_GROUPS: { type: AccountType; label: string }[] = [
   { type: 'Cuenta', label: 'Cuentas' },
   { type: 'Ahorro', label: 'Ahorro e inversión' },
-  { type: 'Crédito', label: 'Tarjetas de crédito' },
+  { type: 'Crédito', label: 'Crédito' },
 ]
 
 const COLOR_HEX: Record<string, string> = {
@@ -47,25 +47,27 @@ export default function CuentasPage() {
 
       <div className="scroll">
 
-        {/* Patrimonio neto */}
+        {/* Patrimonio neto + desglose (4 bloques separados por línea divisora) */}
         <div className="card networth">
-          <div className="nw-l">
-            <div style={{ fontSize: 12, color: 'var(--text-faint)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '.5px' }}>Patrimonio neto</div>
+          <div className="nw-block">
+            <div className="nw-label">Patrimonio neto</div>
             <div className={`nw-amount${patrimonio < 0 ? ' red' : ''}`}>{clp(patrimonio)}</div>
-            <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 8 }}>Disponible + ahorro − deudas de tarjeta</div>
+            <div className="nw-sub">∑ Disponible + ahorro − deuda de crédito</div>
           </div>
-          <div className="nw-breakdown">
-            {[
-              { label: 'Disponible', val: disponible, dot: 'c-emerald', red: false },
-              { label: 'Ahorro',     val: ahorro,     dot: 'c-violet', red: false },
-              { label: 'Deudas',     val: Math.abs(deudas), dot: 'c-red', red: deudas < 0 },
-            ].map(({ label, val, dot, red }) => (
-              <div key={label} className="nw-item">
-                <div className={`nw-dot ${dot}`} />
-                {label}
-                <b className={red ? 'red' : ''}>{red ? '−' : ''}{clp(val)}</b>
-              </div>
-            ))}
+          <div className="nw-block">
+            <div className="nw-label">Disponible</div>
+            <div className="nw-amount">{clp(disponible)}</div>
+            <div className="nw-sub">∑ de cuentas</div>
+          </div>
+          <div className="nw-block">
+            <div className="nw-label">Ahorro e inversión</div>
+            <div className="nw-amount">{clp(ahorro)}</div>
+            <div className="nw-sub">∑ de ahorro e inversión</div>
+          </div>
+          <div className="nw-block">
+            <div className="nw-label">Crédito</div>
+            <div className={`nw-amount${deudas < 0 ? ' red' : ''}`}>{clp(deudas)}</div>
+            <div className="nw-sub">∑ de tarjetas y líneas de crédito</div>
           </div>
         </div>
 

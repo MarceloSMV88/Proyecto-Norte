@@ -17,6 +17,11 @@ const COLOR_HEX: Record<string, string> = {
   emerald: '#34c98a', blue: '#4f93f5', violet: '#9b8cf0', amber: '#e6b25a', red: '#ef7a63', slate: '#7c8893',
 }
 
+// Paleta del donut "Gasto por categoría" — un color por posición (rank), no por el color
+// propio de la categoría (que suele ser el mismo para todas). "Otros" siempre gris.
+const DONUT_PALETTE = ['#34c98a', '#ef7a63', '#e6b25a', '#4f93f5', '#9b8cf0']
+const DONUT_OTROS = '#7c8893'
+
 export default function ResumenPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
@@ -126,12 +131,20 @@ export default function ResumenPage() {
   }
 
   const filteredCats = catFilter === 'Todas' ? categories : categories.filter(c => c.group_name === catFilter)
-  const donutSegs = [...categories].filter(c => c.spent > 0).sort((a, b) => b.spent - a.spent).slice(0, 5)
-  const donutTotal = donutSegs.reduce((a, c) => a + c.spent, 0)
+
+  // Donut "Gasto por categoría": top 5 con paleta por posición + "Otros" (resto agrupado).
+  // Los % son sobre el gasto TOTAL del mes (top 5 + otros = 100%), como en el diseño.
+  const spentCats = [...categories].filter(c => c.spent > 0).sort((a, b) => b.spent - a.spent)
+  const donutTotal = spentCats.reduce((a, c) => a + c.spent, 0)
+  const otrosSpent = spentCats.slice(5).reduce((a, c) => a + c.spent, 0)
+  const donutSegs: { name: string; spent: number; color: string }[] = spentCats.slice(0, 5)
+    .map((c, i) => ({ name: c.name, spent: c.spent, color: DONUT_PALETTE[i] }))
+  if (otrosSpent > 0) donutSegs.push({ name: 'Otros', spent: otrosSpent, color: DONUT_OTROS })
 
   // Donut SVG
   const DR = 65, DC = 75
   const donutC = 2 * Math.PI * DR
+  const DONUT_GAP = 3 // separación entre segmentos (unidades de arco)
   let donutOffset = 0
 
   return (
@@ -332,12 +345,13 @@ export default function ResumenPage() {
                       <circle cx={DC} cy={DC} r={DR} fill="none" stroke="var(--hairline)" strokeWidth={10} />
                       {donutSegs.map((seg, i) => {
                         const pct = seg.spent / donutTotal
-                        const dash = pct * donutC
+                        // Separación entre segmentos: se recorta un poco el arco (mín. 0)
+                        const dash = Math.max(0, pct * donutC - DONUT_GAP)
                         const rot = (donutOffset * 360) - 90
                         donutOffset += pct
                         return (
                           <circle key={i} cx={DC} cy={DC} r={DR} fill="none"
-                            stroke={COLOR_HEX[seg.color] || '#34c98a'} strokeWidth={10}
+                            stroke={seg.color} strokeWidth={10}
                             strokeLinecap="round"
                             strokeDasharray={`${dash} ${donutC - dash}`}
                             style={{ transform: `rotate(${rot}deg)`, transformOrigin: 'center' }} />
@@ -352,7 +366,7 @@ export default function ResumenPage() {
                   <div className="donut-legend">
                     {donutSegs.map((seg, i) => (
                       <div key={i} className="dl">
-                        <span className={`dot c-${seg.color}`} />
+                        <span className="dot" style={{ background: seg.color }} />
                         <span className="dl-name">{seg.name}</span>
                         <span className="dl-val">{Math.round((seg.spent / donutTotal) * 100)}%</span>
                       </div>
