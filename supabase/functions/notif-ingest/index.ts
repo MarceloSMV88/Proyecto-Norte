@@ -55,6 +55,14 @@ type Parsed =
       destBankHint: string // banco dueño de la app que notificó (destino del dinero)
       dateStr: string | null
     }
+  | {
+      parser: string
+      kind: 'pago_tc'
+      amt: number
+      last4: string        // tarjeta que se paga (destino del abono)
+      originBankHint: string // banco de la cuenta corriente de origen (mismo banco por defecto)
+      dateStr: string | null
+    }
 
 type ParserFn = (title: string, text: string) => Parsed | null
 
@@ -86,6 +94,17 @@ const parsers: ParserFn[] = [
       parser: 'ripley_trf_recibida', kind: 'trf_recibida', amt,
       senderName: m[2].trim(), senderBank: m[3].trim(), destBankHint: 'ripley', dateStr,
     }
+  },
+  // Banco Ripley — PAGO de la tarjeta de crédito (desde cuenta corriente).
+  // título: "Pago por $1.847.199 a tu Tarjeta Ripley"
+  // cuerpo: "Has realizado un pago por $1.847.199 a tu Tarjeta Ripley terminada en 5116 el 03/07/2026 a las 13:55."
+  // Es una transferencia interna (cta cte -> TC), NO un gasto: abona la TC (baja la deuda) y descuenta la cuenta.
+  (title, text) => {
+    const m = text.match(/Has realizado un pago por\s*\$\s*([\d.,]+)\s+a\s+tu\s+Tarjeta[^]*?terminada\s+en\s+(\d{4})\s+el\s+(\d{1,2})\/(\d{1,2})\/(\d{4})/i)
+    if (!m) return null
+    const amt = parseInt(m[1].replace(/[^0-9]/g, ''), 10)
+    const dateStr = `${m[5]}-${m[4].padStart(2, '0')}-${m[3].padStart(2, '0')}`
+    return { parser: 'ripley_pago_tc', kind: 'pago_tc', amt, last4: m[2], originBankHint: 'ripley', dateStr }
   },
 ]
 
@@ -134,6 +153,48 @@ Deno.serve(async (req) => {
   const when = postTime && Number.isFinite(postTime) ? new Date(postTime) : new Date()
   const dateStr = parsed.dateStr ?? chileDate(when)
   const month = dateStr.slice(0, 7) + '-01'
+
+  // === Rama PAGO DE TARJETA DE CRÉDITO (cta cte -> TC, transferencia interna) ===
+  // NO es gasto (el gasto ya se registró al usar la tarjeta): abona la TC (sube el balance
+  // hacia 0, baja la deuda) y descuenta la cuenta corriente de origen. 2 patas type 'transfer'.
+  if (parsed.kind === 'pago_tc') {
+    const { amt, last4, originBankHint } = parsed
+
+    // Destino: la TC por last4 (define el perfil)
+    const { data: card } = await sb.from('accounts')
+      .select('id, profile_id').eq('last4', last4).limit(1).maybeSingle()
+    let profileId = card?.profile_id ?? null
+    if (!profileId) {
+      const { data: prof } = await sb.from('profiles').select('id').eq('role', 'Admin').limit(1).single()
+      if (!prof) return json({ error: 'no_profile' }, 500)
+      profileId = prof.id
+    }
+
+    // Dedup: mismo abono (+amt) a la TC en la misma fecha
+    if (card) {
+      const { data: dup } = await sb.from('transactions').select('id')
+        .eq('profile_id', profileId).eq('account_id', card.id).eq('amount', amt).eq('date', dateStr).limit(1)
+      if (dup && dup.length > 0) return json({ ok: true, inserted: false, reason: 'duplicate' })
+    }
+
+    // Origen: cuenta de depósito (no TC) del mismo banco (por defecto se paga desde ahí)
+    const { data: accts } = await sb.from('accounts')
+      .select('id, bank, name, type').eq('profile_id', profileId)
+    const origin = (accts ?? []).find(a =>
+      a.type !== 'Crédito' && (normBank(a.bank).includes(originBankHint) || normBank(a.name).includes(originBankHint))
+    ) ?? null
+
+    // Patas (el trigger de BD mueve los saldos): TC +amt (baja deuda), cta cte -amt
+    const rows: Record<string, unknown>[] = []
+    if (card) rows.push({ profile_id: profileId, name: 'Pago TC Ripley', amount: amt, type: 'transfer', category_id: null, account_id: card.id, description: origin ? `desde ${origin.name}` : null, source: 'bank_app', date: dateStr })
+    if (origin) rows.push({ profile_id: profileId, name: 'Pago TC Ripley', amount: -amt, type: 'transfer', category_id: null, account_id: origin.id, description: 'Pago de tarjeta', source: 'bank_app', date: dateStr })
+    if (rows.length === 0) return json({ ok: false, reason: 'no_accounts' })
+
+    const { data: ins, error: insErr } = await sb.from('transactions').insert(rows).select('id')
+    if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
+
+    return json({ ok: true, inserted: true, parser: parsed.parser, kind: 'pago_tc', legs: (ins ?? []).length, amount: amt, card_matched: !!card, origin_matched: !!origin, date: dateStr })
+  }
 
   // === Rama TRANSFERENCIA RECIBIDA (notificación del banco destino) ===
   // Interna (remitente = tú): la ignora — el pipeline de Gmail la registra completa
