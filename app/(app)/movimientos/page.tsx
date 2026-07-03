@@ -33,19 +33,25 @@ export default function MovimientosPage() {
 
   const load = useCallback(async () => {
     if (!activeProfile) return
+    // La ventana de la consulta la define el rango de fechas si está activo; si no, el mes del selector.
+    // (Antes solo consultaba el mes → un movimiento con fecha de otro mes no aparecía aunque estuviera en la BD.)
+    let q = supabase.from('transactions').select('*, categories(name,icon,color), accounts(name)')
+      .eq('profile_id', activeProfile.id)
+    if (dateFrom || dateTo) {
+      if (dateFrom) q = q.gte('date', dateFrom)
+      if (dateTo) q = q.lte('date', dateTo)
+    } else {
+      q = q.gte('date', selectedMonth).lt('date', nextMonthStr(selectedMonth))
+    }
     const [txs, cats, accs] = await Promise.all([
-      supabase.from('transactions').select('*, categories(name,icon,color), accounts(name)')
-        .eq('profile_id', activeProfile.id)
-        .gte('date', selectedMonth)
-        .lt('date', nextMonthStr(selectedMonth))
-        .order('date', { ascending: false }).order('created_at', { ascending: false }).limit(200),
+      q.order('date', { ascending: false }).order('created_at', { ascending: false }).limit(300),
       supabase.from('categories').select('*').eq('profile_id', activeProfile.id),
       supabase.from('accounts').select('*').eq('profile_id', activeProfile.id),
     ])
     setTransactions((txs.data || []) as Transaction[])
     setCategories((cats.data || []) as Category[])
     setAccounts((accs.data || []) as Account[])
-  }, [activeProfile, supabase, selectedMonth])
+  }, [activeProfile, supabase, selectedMonth, dateFrom, dateTo])
 
   useEffect(() => { load() }, [load])
 
@@ -164,7 +170,14 @@ export default function MovimientosPage() {
           categories={categories}
           accounts={accounts}
           onClose={() => setModal(null)}
-          onSaved={load}
+          onSaved={savedDate => {
+            // Si el movimiento cae en otro mes (y no hay rango activo), saltar a ese mes para verlo
+            if (savedDate && !dateFrom && !dateTo) {
+              const m = savedDate.slice(0, 7) + '-01'
+              if (m !== selectedMonth) { setSelectedMonth(m); return }
+            }
+            load()
+          }}
         />
       )}
     </div>

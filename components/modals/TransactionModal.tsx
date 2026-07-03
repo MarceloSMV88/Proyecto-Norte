@@ -23,7 +23,7 @@ export default function TransactionModal({ type, profileId, categories, accounts
   categories: Category[]
   accounts: Account[]
   onClose: () => void
-  onSaved: () => void
+  onSaved: (savedDate?: string) => void
 }) {
   const [rawAmount, setRawAmount] = useState('')
   const [categoryId, setCategoryId] = useState('')
@@ -81,7 +81,7 @@ export default function TransactionModal({ type, profileId, categories, accounts
     setSaving(false)
     if (error) { showToast('Error al guardar'); return }
     showToast('✓ Registrado')
-    onSaved()
+    onSaved(date)
     onClose()
   }
 
