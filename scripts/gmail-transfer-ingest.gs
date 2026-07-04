@@ -13,8 +13,13 @@
 const ENDPOINT = 'https://gfswrtyxgsxakkpgduda.supabase.co/functions/v1/transfer-ingest';
 const SECRET   = 'bd7d9dfa18af488ca9b89e3335efedf56a9bdbb5892a4f96bd6dfde12874f29a';
 const LABEL    = 'norte-procesado';
-const SEARCH   = '(from:santander.cl OR from:bancochile.cl OR from:bancoripley.cl) '
-               + 'subject:(transferencia OR Comprobante OR Transferencias)';
+// Ojo: "Cargo en Cuenta" (Banco de Chile avisando un cargo de Servipag) NO se agrega a
+// propósito — Servipag ya manda su propio comprobante con el detalle real (empresa/monto);
+// procesar ambos duplicaría el gasto.
+const SEARCH   = '((from:santander.cl OR from:bancochile.cl OR from:bancoripley.cl OR from:servipag.cl) '
+               + 'subject:(transferencia OR Comprobante OR Transferencias OR Deuda)) '
+               + 'OR (from:metlife.cl subject:(dividendo)) '
+               + 'OR (from:transaccionalcoopeuch.com subject:(Cuotas))';
 
 /**
  * EJECUTAR UNA SOLA VEZ antes de activar el trigger.
@@ -40,6 +45,9 @@ function procesarTransferencias() {
       if (from.indexOf('santander') > -1)      data = parseSantander(body);
       else if (from.indexOf('bancochile') > -1) data = parseChile(body);
       else if (from.indexOf('ripley') > -1)     data = parseRipley(body);
+      else if (from.indexOf('servipag') > -1)   data = parseServipag(body);
+      else if (from.indexOf('metlife') > -1)    data = parseMetlifeDividendo(body);
+      else if (from.indexOf('transaccionalcoopeuch') > -1) data = parseCoopeuchCuotas(body);
       if (!data) return;
 
       // Un parser puede devolver varios items (ej: "Comprobante de pago" con N cuentas pagadas)
@@ -63,6 +71,8 @@ function money(src, re) { return g(re, src).replace(/\./g, ''); }
 
 // ── Santander ──────────────────────────────────────────────
 function parseSantander(txt) {
+  // Plantilla "Comprobante pago deuda Nacional de Tarjeta de Credito" (abono cta cte -> TC)
+  if (/deuda\s+nacional\s+de\s+tarjeta\s+de\s+cr[eé]dito/i.test(txt)) return parseSantanderPagoTC(txt);
   const amount = money(txt, /Monto\s+transferido[^$]*\$\s*([\d.]+)/i);
   const date   = g(/(\d{1,2}\/\d{1,2}\/\d{4})/, txt);
   const idxDest = txt.search(/Datos\s+de\s+destino/i);
@@ -190,6 +200,82 @@ function parseChileTerceros(txt) {
     destBank:      bancoEn(dBlk),
     txnId:         g(/Transacci[óo]n[\s:]*[\r\n]*\s*([A-Z0-9]{10,})/i, txt) || g(/\bID[:\s]+([A-Z0-9_]{6,})/, txt),
     comment:       g(/Mensaje[:\s]*([^\n\r]+)/i, txt),
+  };
+}
+
+// Plantilla "Comprobante pago deuda Nacional de Tarjeta de Crédito" (abono desde cta cte a TC).
+// Bloques ORIGEN (cuenta que se descuenta) y DESTINO (tarjeta que se abona).
+function parseSantanderPagoTC(txt) {
+  const amount = money(txt, /Monto\s+del\s+pago[:\s]*\$?\s*([\d.,]+)/i);
+  const date = g(/fecha\s+(\d{1,2}\/\d{1,2}\/\d{4})/i, txt) || g(/(\d{1,2}\/\d{1,2}\/\d{4})/, txt);
+
+  const iOrigen = txt.search(/ORIGEN/i);
+  const iDestino = txt.search(/DESTINO/i);
+  const origBlk = iOrigen > -1 ? txt.slice(iOrigen, iDestino > -1 ? iDestino : txt.length) : '';
+  const destBlk = iDestino > -1 ? txt.slice(iDestino) : '';
+
+  const originAccount = g(/(\d[\d.\-]{6,}\d)/, origBlk);
+  // La tarjeta viene enmascarada (**** **** **** 2838): el último grupo de 4 dígitos del bloque destino.
+  const last4Matches = destBlk.match(/\d{4}/g) || [];
+  const last4 = last4Matches.length ? last4Matches[last4Matches.length - 1] : '';
+
+  return { kind: 'pago_tc', amount, date, originAccount, last4 };
+}
+
+// ── Coopeuch (cuotas de participación) ──────────────────────
+// Descuenta la cuenta Coopeuch identificada por el last4 de "Cuenta de Pago" y abona
+// "Copeuch - Cuotas Parcipación" (siempre la misma cuenta destino, fija).
+function parseCoopeuchCuotas(txt) {
+  const amount = money(txt, /Monto\s+a\s+Pagar[\s\S]{0,30}?\$\s*([\d.,]+)/i);
+  const dm = txt.match(/Fecha\s+de\s+pago[\s\S]{0,30}?(\d{1,2})-(\d{1,2})-(\d{4})/i);
+  const date = dm ? `${dm[1]}/${dm[2]}/${dm[3]}` : '';
+  const last4 = g(/CUENTA\s+VISTA\s+X+(\d{4})/i, txt);
+  return { kind: 'coopeuch_cuotas', amount, date, last4 };
+}
+
+// ── Servipag (pago de cuentas de servicio vía servipag.cl, cualquier banco como medio de pago) ──
+// Plantilla con 2 tablas ANCHAS (fila de encabezados + fila de valores, no pares etiqueta/valor):
+//   Resumen de pago:  Nombre | Fecha | Hora transacción | Número de consulta | Valor | Forma de pago
+//   Detalle de pago:  Empresa | Nombre | Identificador de cuenta | Valor | Código autorización de pago
+// "Forma de pago" trae solo el NOMBRE del banco (no la cuenta) -> se manda como originBank
+// para que transfer-ingest matchee la cuenta por nombre de banco.
+function parseServipag(txt) {
+  const iDetalle = txt.search(/Detalle\s+de\s+pago/i);
+  const resumenBlk = iDetalle > -1 ? txt.slice(0, iDetalle) : txt;
+  const detalleBlk = iDetalle > -1 ? txt.slice(iDetalle) : '';
+
+  const date = g(/(\d{1,2}\/\d{1,2}\/\d{4})/, resumenBlk);
+  // Forma de pago: texto alfabético después del monto, en la fila de valores del resumen.
+  const originBank = g(/\$\s*[\d.,]+\s+([A-Za-zÁÉÍÓÚÑáéíóúñ]+(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+)*)/, resumenBlk);
+
+  // Detalle: tras los 5 encabezados viene la fila de valores: Empresa Nombre Identificador Valor Código
+  const m = detalleBlk.match(/Empresa[\s\S]*?Identificador\s+de\s+cuenta[\s\S]*?Valor[\s\S]*?C[oó]digo\s+autorizaci[oó]n[\s\S]*?pago[\s\S]*?([A-Za-zÁÉÍÓÚÑáéíóúñ0-9().\-\/ ]+?)\s+(\d{5,})\s*\$\s*([\d.,]+)/i);
+  return {
+    kind: 'pago_servicio',
+    empresa: m ? m[1].trim() : '',
+    identificador: m ? m[2].trim() : '',
+    amount: m ? m[3].replace(/\./g, '') : '',
+    date: date,
+    originBank: originBank,
+  };
+}
+
+// ── MetLife (pago de dividendo hipotecario) ─────────────────
+// Tabla "RESUMEN": pares etiqueta/valor (Nombre, RUT, Monto total pagado, ID transacción, Fecha de pago).
+// Tabla "DETALLE": ANCHA (Crédito | N° de dividendo | Fecha de vencimiento + fila de valores).
+// El "empresa" queda fijo (identifica siempre esta fuente para la regla de categoría METLIFE
+// y no depende de parsear un nombre variable).
+function parseMetlifeDividendo(txt) {
+  const amount = money(txt, /Monto\s+total\s+pagado[\s\S]{0,30}?\$\s*([\d.,]+)/i);
+  const date = g(/Fecha\s+de\s+pago[\s\S]{0,30}?(\d{1,2}\/\d{1,2}\/\d{4})/i, txt);
+  const det = txt.match(/Cr[eé]dito[\s\S]*?N[°º]\s*de\s+dividendo[\s\S]*?Fecha\s+de\s+vencimiento[\s\S]*?([A-Za-z0-9]+)\s+([A-Za-z0-9]+)\s+(\d{1,2}\/\d{1,2}\/\d{4})/i);
+  const dividendoNum = det ? det[2] : '';
+  return {
+    kind: 'pago_servicio',
+    empresa: 'Metlife - Dividendo Estación Central',
+    identificador: dividendoNum,
+    amount: amount,
+    date: date,
   };
 }
 

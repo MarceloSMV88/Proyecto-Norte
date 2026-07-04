@@ -37,24 +37,152 @@ function tokens(desc: string) {
   const g = (k: string) => (desc.match(new RegExp(`#${k}:([^\\s]*)`)) ?? [])[1] ?? ''
   return { oa: g('oa'), da: g('da'), ob: g('ob'), db: g('db'), tx: g('tx') }
 }
+function nameTokensLoose(s: unknown): string[] {
+  return String(s ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(t => t.length >= 3)
+}
+
+// Vincula automáticamente un movimiento recién insertado a un compromiso mensual
+// (monthly_commitments) cuando hay EXACTAMENTE UN candidato sin ambigüedad — mismo perfil,
+// mes, categoría, sin confirmar aún, y cuyo matcher_hint (o nombre) aparece COMPLETO en el
+// texto del movimiento. Si hay 0 o >1 candidatos, no hace nada (queda para la sugerencia
+// 'detectado' del lado del cliente, que el usuario confirma a mano).
+async function linkCommitment(
+  sb: ReturnType<typeof createClient>, profileId: string, categoryId: string | null,
+  txId: string, txName: string, txDesc: string, amount: number, dateStr: string,
+) {
+  if (!categoryId) return
+  const month = dateStr.slice(0, 7) + '-01'
+  const { data: cands } = await sb.from('monthly_commitments')
+    .select('id, name, matcher_hint')
+    .eq('profile_id', profileId).eq('month', month).eq('category_id', categoryId)
+    .is('paid_transaction_id', null)
+    .not('status', 'in', '(pagado,omitido)')
+  if (!cands || cands.length === 0) return
+  const haystack = nameTokensLoose(`${txName} ${txDesc}`).join(' ')
+  const matches = cands.filter(c => {
+    const hintTokens = nameTokensLoose(c.matcher_hint || c.name)
+    return hintTokens.length > 0 && hintTokens.every(t => haystack.includes(t))
+  })
+  if (matches.length !== 1) return
+  await sb.from('monthly_commitments').update({
+    status: 'pagado', actual_amount: Math.abs(amount), paid_transaction_id: txId,
+  }).eq('id', matches[0].id)
+}
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
   const sb = createClient(SUPABASE_URL, SERVICE_KEY)
+
+  async function logFailure(reason: string, payload: unknown) {
+    console.error(`transfer-ingest ${reason}:`, JSON.stringify(payload))
+    await sb.from('ingest_failures').insert({ fn: 'transfer-ingest', reason, payload: payload ?? null })
+  }
+
   const provided = req.headers.get('x-ingest-secret') ?? ''
   const { data: cfg } = await sb.from('ingest_config').select('secret').eq('id', 1).single()
   if (!cfg || provided !== cfg.secret) return json({ error: 'unauthorized' }, 401)
   let b: Record<string, unknown>
   try { b = await req.json() } catch { return json({ error: 'bad_json' }, 400) }
 
-  // === Pago de cuentas de servicio (mail "Comprobante de pago" del Chile, N items por mail) ===
+  // === Pago de tarjeta de crédito (cta cte -> TC, transferencia interna) vía mail del banco ===
+  // NO es gasto (el gasto ya se registró al usar la tarjeta): abona la TC (baja la deuda) y
+  // descuenta la cuenta de origen. 2 patas type 'transfer', sin categoría de presupuesto.
+  if (String(b.kind ?? '') === 'pago_tc') {
+    const amt = parseInt(digits(b.amount), 10)
+    if (!amt || amt <= 0) { await logFailure('bad_amount', b); return json({ error: 'bad_amount', got: b.amount }, 400) }
+    const last4 = String(b.last4 ?? '').trim()
+    const dateStr = normDate(b.date)
+
+    const { data: card } = await sb.from('accounts').select('id, profile_id, bank, name').eq('last4', last4).limit(1).maybeSingle()
+    let profileId = card?.profile_id ?? null
+    if (!profileId) {
+      const { data: prof } = await sb.from('profiles').select('id').eq('role', 'Admin').limit(1).single()
+      if (!prof) return json({ error: 'no_profile' }, 500)
+      profileId = prof.id
+    }
+
+    if (card) {
+      const { data: dup } = await sb.from('transactions').select('id')
+        .eq('profile_id', profileId).eq('account_id', card.id).eq('amount', amt).eq('date', dateStr).limit(1)
+      if (dup && dup.length > 0) return json({ ok: true, inserted: false, reason: 'duplicate' })
+    }
+
+    const { data: accts } = await sb.from('accounts').select('id, account_number, name').eq('profile_id', profileId)
+    const originAcctD = digits(b.originAccount)
+    const k = acctKey(originAcctD)
+    const origin = k ? ((accts ?? []).find(a => a.account_number && acctKey(digits(a.account_number)) === k) ?? null) : null
+
+    const label = card?.bank ? `Pago TC ${card.bank}` : 'Pago de tarjeta'
+    const rows: Record<string, unknown>[] = []
+    if (card) rows.push({ profile_id: profileId, name: label, amount: amt, type: 'transfer', category_id: null, account_id: card.id, description: origin ? `desde ${origin.name}` : null, source: 'gmail_transfer', date: dateStr })
+    if (origin) rows.push({ profile_id: profileId, name: label, amount: -amt, type: 'transfer', category_id: null, account_id: origin.id, description: 'Pago de tarjeta', source: 'gmail_transfer', date: dateStr })
+    if (rows.length === 0) return json({ ok: false, reason: 'no_accounts' })
+
+    const { data: ins, error: insErr } = await sb.from('transactions').insert(rows).select('id')
+    if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
+
+    // Auto-vínculo al compromiso-recordatorio de esta TC (ej. "Santander T. Crédito"), si hay uno solo.
+    if (card) {
+      const month = dateStr.slice(0, 7) + '-01'
+      const { data: catRow } = await sb.from('categories').select('id')
+        .eq('profile_id', profileId).eq('name', 'Tarjetas de crédito').eq('month', month).limit(1).maybeSingle()
+      if (catRow) await linkCommitment(sb, profileId, catRow.id, ins![0].id, label, '', amt, dateStr)
+    }
+
+    return json({ ok: true, inserted: true, kind: 'pago_tc', legs: (ins ?? []).length, amount: amt, card_matched: !!card, origin_matched: !!origin, date: dateStr })
+  }
+
+  // === Pago de cuota de participación Coopeuch (transferencia interna entre 2 cuentas Coopeuch) ===
+  // Fijo y conocido: siempre descuenta "Copeuch - Monedero Digital" (identificada por last4 de
+  // la cuenta vista del mail) y abona "Copeuch - Cuotas Parcipación" (cuenta de ahorro, por nombre).
+  if (String(b.kind ?? '') === 'coopeuch_cuotas') {
+    const amt = parseInt(digits(b.amount), 10)
+    if (!amt || amt <= 0) { await logFailure('bad_amount', b); return json({ error: 'bad_amount', got: b.amount }, 400) }
+    const last4 = String(b.last4 ?? '').trim()
+    const dateStr = normDate(b.date)
+    const month = dateStr.slice(0, 7) + '-01'
+
+    const { data: adminProf } = await sb.from('profiles').select('id').eq('role', 'Admin').limit(1).single()
+    if (!adminProf) return json({ error: 'no_profile' }, 500)
+    const profileId = adminProf.id as string
+
+    const label = 'Cuotas de Participación Coopeuch'
+    const { data: dup } = await sb.from('transactions').select('id')
+      .eq('profile_id', profileId).eq('name', label).eq('amount', -amt).eq('date', dateStr).limit(1)
+    if (dup && dup.length > 0) return json({ ok: true, inserted: false, reason: 'duplicate' })
+
+    const { data: accts } = await sb.from('accounts').select('id, account_number, name, bank').eq('profile_id', profileId).eq('bank', 'Copeuch')
+    const origin = (accts ?? []).find(a => a.account_number && last4 && digits(a.account_number).endsWith(last4)) ?? null
+    const dest = (accts ?? []).find(a => a.name.toLowerCase().includes('cuotas')) ?? null
+
+    let categoryId: string | null = null
+    const { data: cat } = await sb.from('categories').select('id')
+      .eq('profile_id', profileId).eq('name', 'Ahorro - Personal').eq('month', month).limit(1).maybeSingle()
+    if (cat) categoryId = cat.id
+
+    const rows: Record<string, unknown>[] = []
+    if (origin) rows.push({ profile_id: profileId, name: label, amount: -amt, type: 'transfer', category_id: categoryId, account_id: origin.id, description: dest ? `hacia ${dest.name}` : null, source: 'gmail_transfer', date: dateStr })
+    if (dest) rows.push({ profile_id: profileId, name: label, amount: amt, type: 'transfer', category_id: categoryId, account_id: dest.id, description: origin ? `desde ${origin.name}` : null, source: 'gmail_transfer', date: dateStr })
+    if (rows.length === 0) return json({ ok: false, reason: 'no_accounts' })
+
+    const { data: ins, error: insErr } = await sb.from('transactions').insert(rows).select('id')
+    if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
+
+    if (categoryId) await linkCommitment(sb, profileId, categoryId, ins![0].id, label, '', -amt, dateStr)
+
+    return json({ ok: true, inserted: true, kind: 'coopeuch_cuotas', legs: (ins ?? []).length, amount: amt, origin_matched: !!origin, dest_matched: !!dest, date: dateStr })
+  }
+
+  // === Pago de cuentas de servicio (mail "Comprobante de pago" del Chile, N items por mail;
+  // o cualquier pago con "empresa" identificable: Servipag, dividendos de créditos hipotecarios, etc.) ===
   // Cada item es un gasto: cargo a la cuenta de origen + categoría por reglas sobre
   // "EMPRESA IDENTIFICADOR" (permite reglas por n° de cliente, ej. mismo Enel en 2 propiedades).
   if (String(b.kind ?? '') === 'pago_servicio') {
     const amt = parseInt(digits(b.amount), 10)
-    if (!amt || amt <= 0) return json({ error: 'bad_amount', got: b.amount }, 400)
+    if (!amt || amt <= 0) { await logFailure('bad_amount', b); return json({ error: 'bad_amount', got: b.amount }, 400) }
     const empresa = String(b.empresa ?? '').replace(/\s+/g, ' ').trim()
-    if (!empresa) return json({ error: 'bad_empresa' }, 400)
+    if (!empresa) { await logFailure('bad_empresa', b); return json({ error: 'bad_empresa' }, 400) }
     const identificador = String(b.identificador ?? '').trim()
     const dateStr = normDate(b.date)
     const month = dateStr.slice(0, 7) + '-01'
@@ -68,10 +196,19 @@ Deno.serve(async (req) => {
       .eq('profile_id', profileId).eq('name', empresa).eq('amount', -amt).eq('date', dateStr).limit(1)
     if (dup && dup.length > 0) return json({ ok: true, inserted: false, reason: 'duplicate' })
 
-    // Cuenta de cargo por número (tolerante a ceros a la izquierda)
-    const { data: accts } = await sb.from('accounts').select('id, account_number').eq('profile_id', profileId)
+    // Cuenta de cargo: por número (tolerante a ceros a la izquierda) y, si no hay número
+    // (ej. Servipag solo indica el banco, no la cuenta), por nombre de banco — prefiriendo
+    // cuenta de depósito sobre TC si el banco tiene ambas.
+    const { data: accts } = await sb.from('accounts').select('id, account_number, bank, name, type').eq('profile_id', profileId)
     const k = acctKey(digits(b.originAccount))
-    const acc = k ? ((accts ?? []).find(a => a.account_number && acctKey(digits(a.account_number)) === k) ?? null) : null
+    let acc = k ? ((accts ?? []).find(a => a.account_number && acctKey(digits(a.account_number)) === k) ?? null) : null
+    if (!acc) {
+      const bankN = normBank(b.originBank)
+      if (bankN && bankN.length >= 3) {
+        const byBank = (accts ?? []).filter(a => { const ab = normBank(a.bank), an = normBank(a.name); return ab === bankN || an === bankN || ab.includes(bankN) || an.includes(bankN) })
+        acc = byBank.find(a => a.type !== 'Crédito') ?? byBank[0] ?? null
+      }
+    }
 
     // Categoría por reglas (match sobre empresa + identificador)
     let categoryId: string | null = null
@@ -96,13 +233,15 @@ Deno.serve(async (req) => {
     if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
 
     // El saldo lo sincroniza el trigger de BD (migración 006).
+    await linkCommitment(sb, profileId, categoryId, ins.id, empresa, identificador, -amt, dateStr)
 
     return json({ ok: true, inserted: true, id: ins.id, kind: 'pago_servicio', empresa, amount: amt, account_matched: !!acc, category_matched: !!categoryId, date: dateStr })
   }
 
   const amount = parseInt(digits(b.amount), 10)
-  if (!amount || amount <= 0) return json({ error: 'bad_amount', got: b.amount }, 400)
+  if (!amount || amount <= 0) { await logFailure('bad_amount', b); return json({ error: 'bad_amount', got: b.amount }, 400) }
   const dateStr = normDate(b.date)
+  const month = dateStr.slice(0, 7) + '-01'
   const originRut = digits(b.originRut)
   const destRut = digits(b.destRut)
   let originAcctD = digits(b.originAccount)
@@ -165,6 +304,25 @@ Deno.serve(async (req) => {
 
   const description = `${comment ? comment + ' ' : ''}#oa:${originAcctD} #da:${destAcctD} #ob:${originBankN} #db:${destBankN} #tx:${txnId}`.trim()
 
+  // Categoría por reglas SOLO para gasto (transfer/ingreso entre tus propias cuentas o de
+  // terceros no tienen una categoría de presupuesto que les aplique). Match sobre destName +
+  // comment, igual criterio que pago_servicio (permite reconocer transferencias recurrentes
+  // a un tercero fijo, ej. gasto común a un condominio).
+  let gastoCategoryId: string | null = null
+  if (txType === 'gasto') {
+    const { data: rules } = await sb.from('category_rules').select('pattern, category_name').eq('profile_id', profileId)
+    if (rules) {
+      const up = `${destName} ${comment}`.toUpperCase()
+      const match = rules.filter(r => up.includes(String(r.pattern).toUpperCase()))
+        .sort((r1, r2) => String(r2.pattern).length - String(r1.pattern).length)[0]
+      if (match) {
+        const { data: cat } = await sb.from('categories').select('id')
+          .eq('profile_id', profileId).eq('name', match.category_name).eq('month', month).limit(1).maybeSingle()
+        if (cat) gastoCategoryId = cat.id
+      }
+    }
+  }
+
   // Patas (legs): interna => 2 movimientos (origen - / destino +)
   type Leg = { account_id: string | null; amount: number; name: string }
   const legs: Leg[] = []
@@ -178,12 +336,15 @@ Deno.serve(async (req) => {
     legs.push({ account_id: originAcc?.id ?? null, amount: -amount, name: `Transferencia a ${destName || 'tercero'}` })
   }
 
-  const rows = legs.map(l => ({ profile_id: profileId, name: l.name, amount: l.amount, type: txType, category_id: null, account_id: l.account_id, description, source: 'gmail_transfer', date: dateStr }))
+  const rows = legs.map(l => ({ profile_id: profileId, name: l.name, amount: l.amount, type: txType, category_id: txType === 'gasto' ? gastoCategoryId : null, account_id: l.account_id, description, source: 'gmail_transfer', date: dateStr }))
   const { data: ins, error: insErr } = await sb.from('transactions').insert(rows).select('id')
   if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
 
   // Los saldos los sincroniza el trigger de BD (migración 006) por cada pata insertada.
   // (Caso "misma cuenta": las patas ±X se anulan solas.)
+  if (txType === 'gasto' && ins && ins[0]) {
+    await linkCommitment(sb, profileId, gastoCategoryId, ins[0].id, legs[0].name, description, legs[0].amount, dateStr)
+  }
 
   return json({ ok: true, inserted: true, legs: (ins ?? []).length, ids: (ins ?? []).map(r => r.id), classification: txType, amount, date: dateStr, origin_matched: !!originAcc, dest_matched: !!destAcc })
 })
