@@ -1,13 +1,14 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutGrid, Layers, ArrowLeftRight, Flag, Wallet, TrendingUp, Settings, LogOut } from 'lucide-react'
+import { LayoutGrid, Layers, ClipboardCheck, ArrowLeftRight, Flag, Wallet, TrendingUp, Settings, LogOut } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useProfiles } from '@/contexts/ProfileContext'
 
 const NAV = [
   { href: '/resumen',     label: 'Resumen',     Icon: LayoutGrid },
   { href: '/presupuesto', label: 'Presupuesto', Icon: Layers },
+  { href: '/compromisos', label: 'Compromisos', Icon: ClipboardCheck },
   { href: '/movimientos', label: 'Movimientos', Icon: ArrowLeftRight },
   { href: '/metas',       label: 'Metas',       Icon: Flag },
   { href: '/cuentas',     label: 'Cuentas',     Icon: Wallet },

@@ -1,12 +1,13 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutGrid, Layers, ArrowLeftRight, Flag, Wallet, TrendingUp, Settings } from 'lucide-react'
+import { LayoutGrid, Layers, ClipboardCheck, ArrowLeftRight, Flag, Wallet, TrendingUp, Settings } from 'lucide-react'
 
 // Tab bar inferior para ≤920px (el sidebar se oculta en ese breakpoint).
 const NAV = [
   { href: '/resumen',     label: 'Resumen',  Icon: LayoutGrid },
   { href: '/presupuesto', label: 'Presup.',  Icon: Layers },
+  { href: '/compromisos', label: 'Comp.',    Icon: ClipboardCheck },
   { href: '/movimientos', label: 'Movs',     Icon: ArrowLeftRight },
   { href: '/metas',       label: 'Metas',    Icon: Flag },
   { href: '/cuentas',     label: 'Cuentas',  Icon: Wallet },

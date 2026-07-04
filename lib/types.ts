@@ -6,6 +6,7 @@ export type UsageLevel = 'alto' | 'medio' | 'bajo'
 export type ProfileRole = 'Admin' | 'Pro'
 export type Theme = 'dark' | 'light'
 export type Density = 'compact' | 'normal' | 'comfy'
+export type CommitmentStatus = 'pendiente' | 'detectado' | 'pagado' | 'vencido' | 'omitido'
 
 export interface Profile {
   id: string
@@ -100,6 +101,27 @@ export interface Upcoming {
   due_date: string
   categories?: { name: string; icon: string } | null
   accounts?: { name: string } | null
+}
+
+export interface MonthlyCommitment {
+  id: string
+  profile_id: string
+  category_id: string
+  account_id: string | null
+  paid_transaction_id: string | null
+  name: string
+  group_name: string
+  expected_amount: number
+  actual_amount: number
+  due_day: number | null
+  payment_method: string | null
+  matcher_hint: string | null
+  status: CommitmentStatus
+  month: string
+  created_at: string
+  categories?: { name: string; icon: string; color: string; group_name: CategoryGroup; assigned: number; spent: number } | null
+  accounts?: { name: string } | null
+  transactions?: { name: string; amount: number; date: string } | null
 }
 
 export interface Summary {
