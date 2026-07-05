@@ -6,7 +6,7 @@ export type UsageLevel = 'alto' | 'medio' | 'bajo'
 export type ProfileRole = 'Admin' | 'Pro'
 export type Theme = 'dark' | 'light'
 export type Density = 'compact' | 'normal' | 'comfy'
-export type CommitmentStatus = 'pendiente' | 'detectado' | 'pagado' | 'vencido' | 'omitido'
+export type CommitmentStatus = 'pendiente' | 'detectado' | 'pagado' | 'vencido' | 'omitido' | 'sin_gasto'
 
 export interface Profile {
   id: string

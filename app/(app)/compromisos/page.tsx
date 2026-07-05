@@ -32,14 +32,16 @@ const STATUS_LABEL: Record<CommitmentStatus, string> = {
   pagado: 'Pagado',
   vencido: 'Vencido',
   omitido: 'No aplica',
+  sin_gasto: 'Sin gasto',
 }
 
 const STATUS_COLOR: Record<CommitmentStatus, string> = {
-  pendiente: 'var(--text-2)',
+  pendiente: 'var(--warn)',
   detectado: 'var(--warn)',
   pagado: 'var(--ok)',
   vencido: 'var(--danger)',
   omitido: 'var(--text-faint)',
+  sin_gasto: 'var(--c-blue)',
 }
 
 function nextMonthStr(month: string): string {
@@ -101,7 +103,7 @@ function detectTransaction(commitment: MonthlyCommitment, transactions: Transact
 }
 
 function effectiveStatus(commitment: MonthlyCommitment, detected?: Transaction | null): CommitmentStatus {
-  if (commitment.status === 'pagado' || commitment.status === 'omitido') return commitment.status
+  if (commitment.status === 'pagado' || commitment.status === 'omitido' || commitment.status === 'sin_gasto') return commitment.status
   if (commitment.paid_transaction_id || commitment.actual_amount > 0) return 'pagado'
   if (detected) return 'detectado'
   const due = dueDateFor(commitment.month, commitment.due_day)
@@ -218,13 +220,15 @@ export default function CompromisosPage() {
   }
 
   // Valor real: se puede traer de un movimiento (detección) o escribir a mano.
-  // Poner un valor > 0 marca el compromiso como pagado; borrarlo lo devuelve a pendiente.
+  // Poner un valor > 0 marca el compromiso como pagado; "0" lo marca sin_gasto; borrarlo
+  // (vacío) lo devuelve a pendiente. Al reabrir uno ya marcado sin_gasto se precarga "0"
+  // (no vacío) para que cerrar sin tocar nada no lo resetee a pendiente por accidente.
   function startEditReal(commitment: MonthlyCommitment, detected?: Transaction | null) {
     setEditingReal(commitment.id)
     const current = commitment.actual_amount > 0
       ? commitment.actual_amount
       : detected ? Math.abs(detected.amount) : 0
-    setRealVal(current > 0 ? String(current) : '')
+    setRealVal(current > 0 ? String(current) : commitment.status === 'sin_gasto' ? '0' : '')
   }
 
   // Un valor real escrito a mano (sin movimiento detectado detrás) no impactaba el
@@ -278,11 +282,16 @@ export default function CompromisosPage() {
       return
     }
 
-    // Borrar el valor real: si era un movimiento fantasma nuestro, lo eliminamos
-    // (revierte el gasto de la categoría); si era real, solo desvinculamos.
+    // Si era un movimiento fantasma nuestro, se elimina (revierte el gasto de la categoría);
+    // si era real, solo se desvincula.
     if (isGhost && linked) await supabase.from('transactions').delete().eq('id', linked.id)
+
+    // Distinción clave: borrar el campo (vacío) vuelve a "pendiente" (sin revisar);
+    // escribir "0" a propósito confirma que este mes no tuvo costo -> "sin_gasto".
+    // Así "sin_gasto" no aparece en el filtro Pendientes (que solo mira pendiente/vencido).
+    const newStatus: CommitmentStatus = valStr.trim() === '' ? 'pendiente' : 'sin_gasto'
     const { error } = await supabase.from('monthly_commitments')
-      .update({ actual_amount: 0, status: 'pendiente' as CommitmentStatus, paid_transaction_id: null })
+      .update({ actual_amount: 0, status: newStatus, paid_transaction_id: null })
       .eq('id', commitmentId)
     if (error) { showToast('No se pudo guardar el valor real'); return }
     load()
@@ -499,7 +508,7 @@ export default function CompromisosPage() {
                               title="Editar valor real"
                               onMouseDown={e => { e.preventDefault(); startEditReal(commitment, detected) }}
                             >
-                              {paid > 0 ? clp(paid) : '—'}
+                              {paid > 0 ? clp(paid) : status === 'sin_gasto' ? clp(0) : '—'}
                             </button>
                           )}
                           <span className={`commitment-real-source${commitment.paid_transaction_id ? ' auto' : status === 'detectado' ? ' suggest' : ''}`}>
