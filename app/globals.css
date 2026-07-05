@@ -434,6 +434,11 @@ html, body { margin: 0; padding: 0; height: 100%; }
 .assign-banner { display: grid; grid-template-columns: minmax(220px, 300px) 1fr 1fr; gap: 28px; align-items: center; }
 .assign-left { border-right: 1px solid var(--hairline); padding-right: 24px; align-self: stretch; display: flex; flex-direction: column; justify-content: center; }
 .bcat-grid { display: grid; grid-template-columns: 1fr 110px 36px 1fr 90px 32px; gap: 12px; align-items: center; }
+/* Movimientos de una categoría aperturada: mismas columnas que bcat-grid, con el monto
+   puesto explícitamente en la 4ta columna para que quede alineado bajo "Gastado"
+   (no perdido al extremo derecho de la fila). */
+.bcat-tx-row { display: grid; grid-template-columns: 1fr 110px 36px 1fr 90px 32px; gap: 12px; align-items: center; padding: 5px 0; }
+.bcat-tx-amount { grid-column: 4; justify-self: start; font-size: 13px; font-weight: 600; font-family: var(--font-ui); color: var(--text-2); }
 
 /* ---- Compromisos ---- */
 /* Resumen compacto (encabezado) */
@@ -553,6 +558,10 @@ html, body { margin: 0; padding: 0; height: 100%; }
      (el estado lo comunica el color del disponible) */
   .bcat-grid { grid-template-columns: minmax(0, 1.5fr) 88px 80px 22px; gap: 8px; }
   .bcat-grid > * { min-width: 0; overflow: hidden; }
+  /* "Gastado" no se muestra en mobile (ver arriba), así que el detalle aperturado
+     tampoco necesita alinearse a esa columna: solo nombre + monto. */
+  .bcat-tx-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  .bcat-tx-amount { grid-column: 2; }
   /* El nombre de la categoría puede ocupar varias líneas en pantallas chicas */
   .bcat-grid > div:first-child > div { min-width: 0; flex-wrap: wrap; }
   .bcat-grid > div:first-child span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }

@@ -1,15 +1,21 @@
 ﻿'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Pencil } from 'lucide-react'
+import { Plus, Pencil, ChevronDown, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
 import CategoryModal from '@/components/modals/CategoryModal'
-import { clp, computeSummary, getCurrentMonth } from '@/lib/utils'
+import { clp, computeSummary, formatDate, getCurrentMonth } from '@/lib/utils'
 import { catEmoji } from '@/lib/icons'
-import type { Category, Account, CategoryGroup } from '@/lib/types'
+import type { Category, Account, CategoryGroup, Transaction } from '@/lib/types'
 
 const GROUPS: CategoryGroup[] = ['Fijos', 'Variables', 'Ahorro']
+
+function nextMonthStr(month: string): string {
+  const d = new Date(month + 'T12:00:00')
+  d.setMonth(d.getMonth() + 1)
+  return d.toISOString().slice(0, 7) + '-01'
+}
 
 export default function PresupuestoPage() {
   const { activeProfile } = useProfiles()
@@ -17,22 +23,39 @@ export default function PresupuestoPage() {
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
   const [categories, setCategories] = useState<Category[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [transactions, setTransactions] = useState<Transaction[]>([])
   const [editing, setEditing] = useState<string | null>(null)
   const [editVal, setEditVal] = useState('')
   const [modalCat, setModalCat] = useState<Category | null>(null)
   const [addGroup, setAddGroup] = useState<CategoryGroup | null>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const load = useCallback(async () => {
     if (!activeProfile) return
-    const [cats, accs] = await Promise.all([
+    const nextMonth = nextMonthStr(selectedMonth)
+    const [cats, accs, txs] = await Promise.all([
       supabase.from('categories').select('*').eq('profile_id', activeProfile.id).eq('month', selectedMonth).order('created_at'),
       supabase.from('accounts').select('*').eq('profile_id', activeProfile.id),
+      supabase.from('transactions').select('*, accounts(name)')
+        .eq('profile_id', activeProfile.id).eq('type', 'gasto')
+        .gte('date', selectedMonth).lt('date', nextMonth)
+        .order('date', { ascending: false }),
     ])
     setCategories((cats.data || []) as Category[])
     setAccounts((accs.data || []) as Account[])
+    setTransactions((txs.data || []) as Transaction[])
   }, [activeProfile, supabase, selectedMonth])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => { setExpanded(new Set()) }, [selectedMonth])
+
+  function toggleExpand(id: string) {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
 
   if (!activeProfile) return null
   const summary = computeSummary(categories, accounts, activeProfile.income)
@@ -159,19 +182,24 @@ export default function PresupuestoPage() {
                   const pct = cat.assigned > 0 ? cat.spent / cat.assigned : 0
                   const status = pct > 1 ? 'var(--danger)' : pct > 0.88 ? 'var(--warn)' : 'var(--ok)'
                   const disp = cat.assigned - cat.spent
+                  const isOpen = expanded.has(cat.id)
+                  const catTxs = transactions.filter(t => t.category_id === cat.id)
 
                   return (
-                    <div key={cat.id} className="bcat-row bcat-grid" style={{ padding: '10px 8px', borderRadius: 10, transition: 'background .15s' }}
+                  <div key={cat.id}>
+                    <div className="bcat-row bcat-grid" style={{ padding: '10px 8px', borderRadius: 10, transition: 'background .15s' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <button onClick={() => toggleExpand(cat.id)} title="Ver movimientos de esta categoría"
+                        style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left', minWidth: 0 }}>
+                        {cat.spent > 0 ? (isOpen ? <ChevronDown size={14} color="var(--text-faint)" /> : <ChevronRight size={14} color="var(--text-faint)" />) : <span style={{ width: 14 }} />}
                         <span style={{ fontSize: 16 }}>{catEmoji(cat.icon)}</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', fontFamily: 'var(--font-ui)' }}>{cat.name}</span>
-                          {cat.fixed && <span style={{ fontSize: 10, color: 'var(--text-faint)', background: 'var(--surface-3)', padding: '1px 5px', borderRadius: 999 }}>Fijo</span>}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                          <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', fontFamily: 'var(--font-ui)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.name}</span>
+                          {cat.fixed && <span style={{ fontSize: 10, color: 'var(--text-faint)', background: 'var(--surface-3)', padding: '1px 5px', borderRadius: 999, flexShrink: 0 }}>Fijo</span>}
                         </div>
-                      </div>
+                      </button>
 
                       {/* Editable assigned */}
                       {editing === cat.id ? (
@@ -218,6 +246,25 @@ export default function PresupuestoPage() {
                         <Pencil size={14} />
                       </button>
                     </div>
+
+                    {isOpen && (
+                      <div style={{ margin: '2px 8px 8px 38px', padding: '4px 0', borderLeft: '2px solid var(--hairline)', paddingLeft: 14 }}>
+                        {catTxs.length === 0 ? (
+                          <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: '6px 0' }}>Sin movimientos este mes.</div>
+                        ) : catTxs.map(tx => (
+                          <div key={tx.id} className="bcat-tx-row">
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tx.name}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                                {formatDate(tx.date)}{tx.accounts?.name && <> · {tx.accounts.name}</>}
+                              </div>
+                            </div>
+                            <span className="bcat-tx-amount">{clp(Math.abs(tx.amount))}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   )
                 })}
               </div>
