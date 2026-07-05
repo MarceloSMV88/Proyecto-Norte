@@ -45,6 +45,7 @@ type Parsed =
       last4: string | null
       cardName: string | null
       dateStr: string | null // fecha de la operación si la notificación la trae
+      bankHint?: string // si el last4 no matchea ninguna cuenta, buscar por banco (TC única de ese banco)
     }
   | {
       parser: string
@@ -105,6 +106,19 @@ const parsers: ParserFn[] = [
     const amt = parseInt(m[1].replace(/[^0-9]/g, ''), 10)
     const dateStr = `${m[5]}-${m[4].padStart(2, '0')}-${m[3].padStart(2, '0')}`
     return { parser: 'ripley_pago_tc', kind: 'pago_tc', amt, last4: m[2], originBankHint: 'ripley', dateStr }
+  },
+  // Banco Santander — compra con Tarjeta de Crédito.
+  // cuerpo: "Transacción por $ 1.790. se realizó una compra con tu Tarjeta de Crédito
+  // ****1147 en SERVICIOS Y COMERCIAL, el 01-07-2026 a las 16:38:41."
+  // Ojo: el número enmascarado que muestra esta notificación (ej. 1147) no siempre coincide
+  // con el last4 real guardado en la cuenta (ej. 2838) — por eso lleva bankHint como respaldo.
+  (title, text) => {
+    const m = text.match(/Transacci[oó]n por\s*\$\s*([\d.,]+)\.?\s+se realiz[oó] una compra con tu Tarjeta de Cr[eé]dito\s*\**(\d{3,4})\s+en\s+(.+?),\s+el\s+(\d{1,2})-(\d{1,2})-(\d{4})/i)
+    if (!m) return null
+    const amt = parseInt(m[1].replace(/[^0-9]/g, ''), 10)
+    const merchant = m[3].replace(/\s+/g, ' ').trim()
+    const dateStr = `${m[6]}-${m[5].padStart(2, '0')}-${m[4].padStart(2, '0')}`
+    return { parser: 'santander_compra', kind: 'gasto', merchant, amt, last4: m[2], cardName: null, dateStr, bankHint: 'santander' }
   },
 ]
 
@@ -255,7 +269,7 @@ Deno.serve(async (req) => {
   }
 
   // === Rama GASTO (compra con tarjeta) ===
-  const { merchant, amt, last4, cardName } = parsed
+  const { merchant, amt, last4, cardName, bankHint } = parsed
 
   // 4) Resolver PERFIL y CUENTA por last4 (misma lógica que wallet-ingest)
   let profileId: string | null = null
@@ -272,6 +286,14 @@ Deno.serve(async (req) => {
     const { data: prof } = await sb.from('profiles').select('id').eq('role', 'Admin').limit(1).single()
     if (!prof) return json({ error: 'no_profile' }, 500)
     profileId = prof.id
+  }
+  // Respaldo: el número enmascarado de algunas notificaciones no coincide con el last4
+  // guardado (ej. Santander). Si hay una única TC de ese banco, se asume esa.
+  if (!accountId && bankHint) {
+    const { data: accts } = await sb.from('accounts')
+      .select('id, bank, name, type').eq('profile_id', profileId).eq('type', 'Crédito')
+    const matches = (accts ?? []).filter(a => normBank(a.bank).includes(bankHint) || normBank(a.name).includes(bankHint))
+    if (matches.length === 1) accountId = matches[0].id
   }
 
   // 5) Dedup entre fuentes: mismo perfil + mismo monto en los últimos 15 min
