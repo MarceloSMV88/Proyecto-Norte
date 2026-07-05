@@ -11,7 +11,7 @@ import { clp, formatDate, getCurrentMonth } from '@/lib/utils'
 import { catEmoji } from '@/lib/icons'
 import type { Transaction, Category, Account } from '@/lib/types'
 
-type TxFilter = 'Todos' | 'Gastos' | 'Ingresos' | 'Recurrentes'
+type TxFilter = 'Todos' | 'Gastos' | 'Ingresos'
 
 function nextMonthStr(month: string): string {
   const d = new Date(month + 'T12:00:00')
@@ -80,7 +80,6 @@ export default function MovimientosPage() {
   const filtered = transactions.filter(tx => {
     if (filter === 'Gastos' && tx.type !== 'gasto') return false
     if (filter === 'Ingresos' && tx.type !== 'ingreso') return false
-    if (filter === 'Recurrentes' && !tx.recurring) return false
     const d = tx.date.slice(0, 10)
     if (dateFrom && d < dateFrom) return false
     if (dateTo && d > dateTo) return false
@@ -102,7 +101,19 @@ export default function MovimientosPage() {
 
   return (
     <div>
-      <Topbar title="Movimientos" month={selectedMonth} onMonthChange={m => { setSelectedMonth(m); setFilter('Todos'); setSearch(''); setDateFrom(''); setDateTo('') }} action={{ label: 'Agregar', onClick: () => setModal('gasto') }} />
+      <Topbar
+        title="Movimientos"
+        month={selectedMonth}
+        onMonthChange={m => { setSelectedMonth(m); setFilter('Todos'); setSearch(''); setDateFrom(''); setDateTo('') }}
+        action={{
+          label: 'Agregar',
+          onClick: () => setModal('gasto'),
+          menu: [
+            { label: 'Agregar gasto', onClick: () => setModal('gasto') },
+            { label: 'Agregar ingreso', onClick: () => setModal('ingreso') },
+          ],
+        }}
+      />
 
       <div className="scroll">
 
@@ -130,7 +141,7 @@ export default function MovimientosPage() {
             <DatePicker range from={dateFrom} to={dateTo} onRangeChange={(f, t) => { setDateFrom(f); setDateTo(t) }} placeholder="Rango de fechas" clearable dropUp={false} />
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
-            {(['Todos', 'Gastos', 'Ingresos', 'Recurrentes'] as TxFilter[]).map(f => (
+            {(['Todos', 'Gastos', 'Ingresos'] as TxFilter[]).map(f => (
               <button key={f} onClick={() => setFilter(f)} className={`chip${filter === f ? ' on' : ''}`}>{f}</button>
             ))}
           </div>
@@ -164,7 +175,6 @@ export default function MovimientosPage() {
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', fontFamily: 'var(--font-ui)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tx.name}</span>
-                          {tx.recurring && <span style={{ fontSize: 10, background: 'var(--surface-3)', color: 'var(--text-faint)', padding: '1px 6px', borderRadius: 999, flexShrink: 0 }}>Recurrente</span>}
                         </div>
                         <div style={{ fontSize: 12, color: 'var(--text-faint)', display: 'flex', gap: 8, alignItems: 'center' }}>
                           {tx.type === 'gasto' ? (

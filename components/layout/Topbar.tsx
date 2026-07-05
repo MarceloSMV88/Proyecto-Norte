@@ -1,12 +1,19 @@
 'use client'
-import { ChevronLeft, ChevronRight, Calendar, Plus } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Calendar, Plus, ChevronDown } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { getCurrentMonth } from '@/lib/utils'
 
 interface TopbarProps {
   title: string
   subtitle?: string
-  action?: { label: string; onClick: () => void; icon?: React.ReactNode }
+  action?: {
+    label: string
+    onClick: () => void
+    icon?: React.ReactNode
+    // Si viene, el botón se convierte en un desplegable con estas opciones (onClick del
+    // action principal queda sin uso en ese caso).
+    menu?: { label: string; onClick: () => void }[]
+  }
   month?: string          // format: '2026-06-01'
   onMonthChange?: (m: string) => void
 }
@@ -129,6 +136,54 @@ function MonthPicker({ month, onMonthChange }: { month: string; onMonthChange: (
   )
 }
 
+function ActionMenu({ action }: { action: NonNullable<TopbarProps['action']> }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [])
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button className="btn-primary" onClick={() => setOpen(o => !o)}>
+        {action.icon ?? <Plus size={17} />}
+        {action.label}
+        <ChevronDown size={15} style={{ opacity: .8 }} />
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '110%', right: 0, zIndex: 200,
+          background: 'var(--surface)', border: '1px solid var(--border-strong)',
+          borderRadius: 12, padding: 6, boxShadow: 'var(--shadow)', minWidth: 180,
+          display: 'flex', flexDirection: 'column', gap: 2, animation: 'fadeIn .15s ease',
+        }}>
+          {action.menu!.map(item => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => { item.onClick(); setOpen(false) }}
+              style={{
+                textAlign: 'left', padding: '9px 10px', borderRadius: 8, border: 'none',
+                background: 'transparent', color: 'var(--text)', cursor: 'pointer',
+                fontFamily: 'var(--font-body)', fontSize: 13.5,
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Topbar({ title, subtitle, action, month, onMonthChange }: TopbarProps) {
   return (
     <header className="topbar">
@@ -141,10 +196,12 @@ export default function Topbar({ title, subtitle, action, month, onMonthChange }
         {month && onMonthChange && <MonthPicker month={month} onMonthChange={onMonthChange} />}
 
         {action && (
-          <button className="btn-primary" onClick={action.onClick}>
-            {action.icon ?? <Plus size={17} />}
-            {action.label}
-          </button>
+          action.menu ? <ActionMenu action={action} /> : (
+            <button className="btn-primary" onClick={action.onClick}>
+              {action.icon ?? <Plus size={17} />}
+              {action.label}
+            </button>
+          )
         )}
       </div>
     </header>
