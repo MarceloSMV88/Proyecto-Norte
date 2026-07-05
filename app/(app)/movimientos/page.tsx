@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { Search } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
+import { useToast } from '@/components/ui/Toast'
 import Topbar from '@/components/layout/Topbar'
 import TransactionModal from '@/components/modals/TransactionModal'
 import DatePicker from '@/components/ui/DatePicker'
@@ -21,6 +22,7 @@ function nextMonthStr(month: string): string {
 export default function MovimientosPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
+  const { showToast } = useToast()
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -30,6 +32,7 @@ export default function MovimientosPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [modal, setModal] = useState<'gasto' | 'ingreso' | null>(null)
+  const [editingCat, setEditingCat] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!activeProfile) return
@@ -56,6 +59,23 @@ export default function MovimientosPage() {
   useEffect(() => { load() }, [load])
 
   if (!activeProfile) return null
+
+  // Categorizar un movimiento que no viene de un compromiso (ej: resto de una transferencia
+  // grande, un gasto que ninguna category_rule matcheó). sync_category_spent (trigger de BD)
+  // toma cualquier transaction con category_id: no hace falta tocar el presupuesto a mano.
+  async function setTxCategory(txId: string, categoryId: string) {
+    setEditingCat(null)
+    const { error } = await supabase.from('transactions').update({ category_id: categoryId || null }).eq('id', txId)
+    if (error) { showToast('No se pudo categorizar'); return }
+    load()
+  }
+
+  // Las categorías tienen una fila por mes: al categorizar hay que ofrecer las del MISMO
+  // mes del movimiento (no las de selectedMonth, que puede diferir si hay un rango de fechas activo).
+  function gastoCategoriesFor(dateStr: string) {
+    const month = dateStr.slice(0, 7) + '-01'
+    return categories.filter(c => c.month === month && c.group_name !== 'Ahorro')
+  }
 
   const filtered = transactions.filter(tx => {
     if (filter === 'Gastos' && tx.type !== 'gasto') return false
@@ -146,8 +166,33 @@ export default function MovimientosPage() {
                           <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', fontFamily: 'var(--font-ui)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tx.name}</span>
                           {tx.recurring && <span style={{ fontSize: 10, background: 'var(--surface-3)', color: 'var(--text-faint)', padding: '1px 6px', borderRadius: 999, flexShrink: 0 }}>Recurrente</span>}
                         </div>
-                        <div style={{ fontSize: 12, color: 'var(--text-faint)', display: 'flex', gap: 8 }}>
-                          {tx.categories?.name && <span>{tx.categories.name}</span>}
+                        <div style={{ fontSize: 12, color: 'var(--text-faint)', display: 'flex', gap: 8, alignItems: 'center' }}>
+                          {tx.type === 'gasto' ? (
+                            editingCat === tx.id ? (
+                              <select
+                                autoFocus
+                                className="role-select"
+                                value={tx.category_id || ''}
+                                onChange={e => setTxCategory(tx.id, e.target.value)}
+                                onBlur={() => setEditingCat(null)}
+                                style={{ maxWidth: 170 }}
+                              >
+                                <option value="">Sin categoría</option>
+                                {gastoCategoriesFor(tx.date).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                            ) : (
+                              <button
+                                onClick={() => setEditingCat(tx.id)}
+                                title="Categorizar este movimiento"
+                                className="chip xs"
+                                style={tx.categories?.name ? undefined : { color: 'var(--warn)', borderColor: 'color-mix(in oklab, var(--warn) 40%, var(--border))' }}
+                              >
+                                {tx.categories?.name || 'Categorizar'}
+                              </button>
+                            )
+                          ) : (
+                            tx.categories?.name && <span>{tx.categories.name}</span>
+                          )}
                           {tx.accounts?.name && <span>· {tx.accounts.name}</span>}
                         </div>
                       </div>

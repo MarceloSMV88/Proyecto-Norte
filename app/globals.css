@@ -397,6 +397,9 @@ html, body { margin: 0; padding: 0; height: 100%; }
 .chip:hover { color: var(--text); border-color: var(--border-strong); }
 .chip.on { border-color: var(--accent); color: var(--text); background: color-mix(in oklab, var(--accent) 12%, var(--surface-2)); }
 .chip-ic { width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; flex-shrink: 0; font-size: 13px; }
+/* Variante delgada: misma pinta (borde + fondo) del chip, para acciones inline dentro
+   de una fila (ej: categorizar un movimiento) sin agrandarla. */
+.chip.xs { padding: 2px 8px; border-radius: 7px; font-size: 11px; gap: 4px; font-weight: 500; }
 .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 /* ---- Toast ---- */
