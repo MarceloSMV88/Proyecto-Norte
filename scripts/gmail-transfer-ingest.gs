@@ -73,6 +73,8 @@ function money(src, re) { return g(re, src).replace(/\./g, ''); }
 function parseSantander(txt) {
   // Plantilla "Comprobante pago deuda Nacional de Tarjeta de Credito" (abono cta cte -> TC)
   if (/deuda\s+nacional\s+de\s+tarjeta\s+de\s+cr[eé]dito/i.test(txt)) return parseSantanderPagoTC(txt);
+  // Plantilla "Comprobante Pago de Cuentas" (multipago en línea, N cuentas por mail)
+  if (/Datos\s+del\s+pago/i.test(txt)) return parseSantanderMultipago(txt);
   const amount = money(txt, /Monto\s+transferido[^$]*\$\s*([\d.]+)/i);
   const date   = g(/(\d{1,2}\/\d{1,2}\/\d{4})/, txt);
   const idxDest = txt.search(/Datos\s+de\s+destino/i);
@@ -220,6 +222,31 @@ function parseSantanderPagoTC(txt) {
   const last4 = last4Matches.length ? last4Matches[last4Matches.length - 1] : '';
 
   return { kind: 'pago_tc', amount, date, originAccount, last4 };
+}
+
+// Plantilla "Comprobante Pago de Cuentas" (multipago en línea del sitio de Santander:
+// N cuentas de servicio pagadas en una sola operación). Tabla "Datos del pago" con
+// Compañía | N° Cliente | Fecha de venc. | Monto, una fila por cuenta.
+// "Medio de pago: Cuenta Corriente" = siempre la Cta Cte del propio Santander (el banco
+// que envía el mail) -> originBank fijo, no depende de extraer un N° de cuenta.
+function parseSantanderMultipago(txt) {
+  const date = g(/fecha\s+(\d{1,2}-\d{1,2}-\d{4})/i, txt).replace(/-/g, '/');
+  const iDatos = txt.search(/Datos\s+del\s+pago/i);
+  const blk = iDatos > -1 ? txt.slice(iDatos) : txt;
+  const items = [];
+  const re = /([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ0-9 ]*?)\s+([\w-]{4,})\s+\d{4}-\d{2}-\d{2}\s+\$\s*([\d.,]+)/g;
+  let m;
+  while ((m = re.exec(blk)) !== null) {
+    items.push({
+      kind: 'pago_servicio',
+      empresa: m[1].trim(),
+      identificador: m[2].trim(),
+      amount: m[3].replace(/\./g, ''),
+      date: date,
+      originBank: 'Santander',
+    });
+  }
+  return items;
 }
 
 // ── Coopeuch (cuotas de participación) ──────────────────────

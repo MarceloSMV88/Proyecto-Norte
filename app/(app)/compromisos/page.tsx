@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ClipboardCheck, CopyPlus, Link2, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
+import { ClipboardCheck, CopyPlus, Link2, Pencil, Plus, Scissors, Search, Trash2, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
 import { useToast } from '@/components/ui/Toast'
@@ -125,6 +125,7 @@ export default function CompromisosPage() {
   const [copying, setCopying] = useState(false)
   const [editingReal, setEditingReal] = useState<string | null>(null)
   const [realVal, setRealVal] = useState('')
+  const [splitFor, setSplitFor] = useState<MonthlyCommitment | null>(null)
 
   const load = useCallback(async () => {
     if (!activeProfile) return
@@ -226,14 +227,109 @@ export default function CompromisosPage() {
     setRealVal(current > 0 ? String(current) : '')
   }
 
+  // Un valor real escrito a mano (sin movimiento detectado detrás) no impactaba el
+  // gasto de la categoría: sync_category_spent solo mira transactions, no monthly_commitments.
+  // Por eso, si no hay un movimiento real ya vinculado, creamos uno "fantasma" (sin
+  // cuenta asociada, para no duplicar el saldo de ninguna cuenta) que sí alimenta el trigger.
   async function commitReal(commitmentId: string, valStr: string) {
     setEditingReal(null)
     const n = parseInt(valStr.replace(/\D/g, '')) || 0
-    const patch = n > 0
-      ? { actual_amount: n, status: 'pagado' as CommitmentStatus }
-      : { actual_amount: 0, status: 'pendiente' as CommitmentStatus, paid_transaction_id: null }
-    const { error } = await supabase.from('monthly_commitments').update(patch).eq('id', commitmentId)
+    const commitment = commitments.find(c => c.id === commitmentId)
+    if (!commitment || !activeProfile) return
+    const linked = commitment.paid_transaction_id
+      ? transactions.find(t => t.id === commitment.paid_transaction_id)
+      : null
+    const isGhost = linked?.source === 'manual_commitment'
+
+    if (n > 0) {
+      if (linked && !isGhost) {
+        // Vinculado a un movimiento bancario real: no lo tocamos, solo guardamos el número mostrado.
+        const { error } = await supabase.from('monthly_commitments')
+          .update({ actual_amount: n, status: 'pagado' as CommitmentStatus }).eq('id', commitmentId)
+        if (error) showToast('No se pudo guardar el valor real')
+        load()
+        return
+      }
+      if (isGhost && linked) {
+        const { error } = await supabase.from('transactions').update({ amount: -n }).eq('id', linked.id)
+        if (error) { showToast('No se pudo actualizar el movimiento'); return }
+        await supabase.from('monthly_commitments').update({ actual_amount: n, status: 'pagado' as CommitmentStatus }).eq('id', commitmentId)
+        load()
+        return
+      }
+      const due = dueDateFor(commitment.month, commitment.due_day) || commitment.month
+      const { data: tx, error: txError } = await supabase.from('transactions').insert({
+        profile_id: activeProfile.id,
+        account_id: null,
+        category_id: commitment.category_id,
+        name: commitment.name,
+        description: 'Registrado manualmente desde Compromisos',
+        amount: -n,
+        type: 'gasto',
+        source: 'manual_commitment',
+        date: due,
+      }).select('id').single()
+      if (txError || !tx) { showToast('No se pudo registrar el gasto'); return }
+      const { error } = await supabase.from('monthly_commitments').update({
+        actual_amount: n, status: 'pagado' as CommitmentStatus, paid_transaction_id: tx.id,
+      }).eq('id', commitmentId)
+      if (error) showToast('No se pudo vincular el movimiento')
+      load()
+      return
+    }
+
+    // Borrar el valor real: si era un movimiento fantasma nuestro, lo eliminamos
+    // (revierte el gasto de la categoría); si era real, solo desvinculamos.
+    if (isGhost && linked) await supabase.from('transactions').delete().eq('id', linked.id)
+    const { error } = await supabase.from('monthly_commitments')
+      .update({ actual_amount: 0, status: 'pendiente' as CommitmentStatus, paid_transaction_id: null })
+      .eq('id', commitmentId)
     if (error) { showToast('No se pudo guardar el valor real'); return }
+    load()
+  }
+
+  // Vincula un compromiso a PARTE de un movimiento existente (ej: una transferencia grande
+  // y sin categoría de la que solo una porción corresponde a este compromiso). Si la porción
+  // cubre el movimiento completo, solo se categoriza; si es menor, se separa en dos filas de
+  // la MISMA cuenta (mismo total, mismo saldo) — una sin categoría con el resto y otra
+  // categorizada y vinculada al compromiso.
+  async function linkPartialTransaction(commitment: MonthlyCommitment, tx: Transaction, portionStr: string) {
+    if (!activeProfile) return
+    const portion = parseInt(portionStr.replace(/\D/g, '')) || 0
+    const remaining = Math.abs(tx.amount)
+    if (portion <= 0 || portion > remaining) { showToast('Monto inválido'); return }
+
+    if (portion === remaining) {
+      const { error } = await supabase.from('transactions').update({ category_id: commitment.category_id }).eq('id', tx.id)
+      if (error) { showToast('No se pudo vincular el movimiento'); return }
+      await supabase.from('monthly_commitments').update({
+        status: 'pagado' as CommitmentStatus, actual_amount: portion, paid_transaction_id: tx.id,
+      }).eq('id', commitment.id)
+      showToast('Movimiento vinculado al compromiso')
+      setSplitFor(null)
+      load()
+      return
+    }
+
+    const { error: updErr } = await supabase.from('transactions').update({ amount: tx.amount + portion }).eq('id', tx.id)
+    if (updErr) { showToast('No se pudo separar el movimiento'); return }
+    const { data: newTx, error: insErr } = await supabase.from('transactions').insert({
+      profile_id: activeProfile.id,
+      account_id: tx.account_id,
+      category_id: commitment.category_id,
+      name: commitment.name,
+      description: `Parte de "${tx.name}" (${clp(remaining)} el ${formatDate(tx.date)})`,
+      amount: -portion,
+      type: 'gasto',
+      source: 'manual_split',
+      date: tx.date,
+    }).select('id').single()
+    if (insErr || !newTx) { showToast('No se pudo crear el movimiento separado'); return }
+    await supabase.from('monthly_commitments').update({
+      status: 'pagado' as CommitmentStatus, actual_amount: portion, paid_transaction_id: newTx.id,
+    }).eq('id', commitment.id)
+    showToast('Movimiento separado y vinculado')
+    setSplitFor(null)
     load()
   }
 
@@ -422,6 +518,9 @@ export default function CompromisosPage() {
                               <Link2 size={15} />
                             </button>
                           )}
+                          <button className="icon-btn ghost" title="Vincular a parte de un movimiento existente" onClick={() => setSplitFor(commitment)}>
+                            <Scissors size={14} />
+                          </button>
                           <button className="icon-btn ghost" title="Editar compromiso" onClick={() => setModalCommitment(commitment)}>
                             <Pencil size={14} />
                           </button>
@@ -447,6 +546,101 @@ export default function CompromisosPage() {
           onSaved={load}
         />
       )}
+
+      {splitFor && (
+        <SplitLinkModal
+          commitment={splitFor}
+          transactions={transactions}
+          onClose={() => setSplitFor(null)}
+          onConfirm={linkPartialTransaction}
+        />
+      )}
+    </div>
+  )
+}
+
+function SplitLinkModal({ commitment, transactions, onClose, onConfirm }: {
+  commitment: MonthlyCommitment
+  transactions: Transaction[]
+  onClose: () => void
+  onConfirm: (commitment: MonthlyCommitment, tx: Transaction, portionStr: string) => void
+}) {
+  useEscapeClose(onClose)
+  const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState<Transaction | null>(null)
+  const [portion, setPortion] = useState('')
+
+  const candidates = transactions
+    .filter(t => t.type === 'gasto' && t.amount < 0)
+    .filter(t => !search || t.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => b.date.localeCompare(a.date))
+
+  function pick(tx: Transaction) {
+    setSelected(tx)
+    setPortion(String(Math.min(commitment.expected_amount || Math.abs(tx.amount), Math.abs(tx.amount))))
+  }
+
+  return (
+    <div className="modal-scrim" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ borderTop: '3px solid var(--accent)' }}>
+        <div className="modal-head">
+          <h3>Vincular "{commitment.name}"</h3>
+          <button type="button" className="icon-btn ghost sm" onClick={onClose}><X size={16} /></button>
+        </div>
+
+        {!selected ? (
+          <>
+            <p className="card-sub" style={{ marginTop: -4, marginBottom: 12 }}>
+              Elige el movimiento del que sale este pago — sirve cuando está incluido dentro de una transferencia más grande.
+            </p>
+            <div style={{ position: 'relative', marginBottom: 12 }}>
+              <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-faint)' }} />
+              <input className="text-input" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar movimiento..." style={{ paddingLeft: 34 }} autoFocus />
+            </div>
+            <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {candidates.length === 0 && <p className="card-sub">Sin movimientos de gasto este mes.</p>}
+              {candidates.map(tx => (
+                <button key={tx.id} type="button" onClick={() => pick(tx)}
+                  style={{ display: 'flex', justifyContent: 'space-between', gap: 10, textAlign: 'left', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
+                  <span>
+                    <b>{tx.name}</b>
+                    <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-faint)' }}>{formatDate(tx.date)}{tx.category_id ? '' : ' · sin categoría'}</span>
+                  </span>
+                  <span style={{ whiteSpace: 'nowrap' }}>{clp(Math.abs(tx.amount))}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="card-sub" style={{ marginTop: -4 }}>
+              {selected.name} · {formatDate(selected.date)} · disponible {clp(Math.abs(selected.amount))}
+            </p>
+            <label className="field-label" style={{ marginTop: 12 }}>Monto que corresponde a este compromiso</label>
+            <div className="amount-field" style={{ marginBottom: 0 }}>
+              <span className="amount-cur">$</span>
+              <input
+                className="amount-input" inputMode="numeric" autoFocus
+                value={portion ? parseInt(portion).toLocaleString('es-CL') : ''}
+                onChange={e => setPortion(e.target.value.replace(/\D/g, ''))}
+              />
+            </div>
+            <p style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 8 }}>
+              {parseInt(portion) === Math.abs(selected.amount)
+                ? 'Cubre el movimiento completo: se categoriza tal cual.'
+                : 'Se separa en dos: el resto queda sin categoría en el mismo movimiento original.'}
+            </p>
+            <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+              <button type="button" className="btn-soft" onClick={() => setSelected(null)}>Volver</button>
+              <button type="button" className="btn-primary block" style={{ marginTop: 0 }}
+                disabled={!portion || parseInt(portion) <= 0 || parseInt(portion) > Math.abs(selected.amount)}
+                onClick={() => onConfirm(commitment, selected, portion)}>
+                Vincular
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
