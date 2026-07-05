@@ -36,8 +36,11 @@ export default function PresupuestoPage() {
     const [cats, accs, txs] = await Promise.all([
       supabase.from('categories').select('*').eq('profile_id', activeProfile.id).eq('month', selectedMonth).order('created_at'),
       supabase.from('accounts').select('*').eq('profile_id', activeProfile.id),
+      // Igual criterio que sync_category_spent: gastos + la pata positiva (destino) de
+      // transferencias categorizadas (ej. aportes a ahorro entre 2 cuentas propias).
       supabase.from('transactions').select('*, accounts(name)')
-        .eq('profile_id', activeProfile.id).eq('type', 'gasto')
+        .eq('profile_id', activeProfile.id)
+        .or('type.eq.gasto,and(type.eq.transfer,amount.gt.0)')
         .gte('date', selectedMonth).lt('date', nextMonth)
         .order('date', { ascending: false }),
     ])
