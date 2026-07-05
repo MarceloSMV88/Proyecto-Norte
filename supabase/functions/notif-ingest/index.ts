@@ -35,6 +35,9 @@ function normBank(s: unknown): string {
   return String(s ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/\b(banco|de|del|la|el|cuenta|corriente|vista|ahorro|cl|sa|s\.a\.)\b/g, '').replace(/[^a-z0-9]/g, '')
 }
+const digits = (s: unknown) => String(s ?? '').replace(/\D/g, '')
+// Los bancos escriben la misma cuenta con o sin ceros a la izquierda (00-407-01867-01 vs 4070186701)
+const acctKey = (d: string) => d.replace(/^0+/, '')
 
 type Parsed =
   | {
@@ -62,6 +65,13 @@ type Parsed =
       amt: number
       last4: string        // tarjeta que se paga (destino del abono)
       originBankHint: string // banco de la cuenta corriente de origen (mismo banco por defecto)
+      dateStr: string | null
+    }
+  | {
+      parser: string
+      kind: 'trf_recibida_cuenta'
+      amt: number
+      destAccount: string  // n° de cuenta destino (la notificación no trae nombre del remitente)
       dateStr: string | null
     }
 
@@ -119,6 +129,17 @@ const parsers: ParserFn[] = [
     const merchant = m[3].replace(/\s+/g, ' ').trim()
     const dateStr = `${m[6]}-${m[5].padStart(2, '0')}-${m[4].padStart(2, '0')}`
     return { parser: 'santander_compra', kind: 'gasto', merchant, amt, last4: m[2], cardName: null, dateStr, bankHint: 'santander' }
+  },
+  // Banco Santander — transferencia recibida (formato minimal, SIN nombre del remitente).
+  // cuerpo: "El 05-07-2026 12:14:06 se realizó una Transferencia hacia tu cuenta 000062610654
+  // por $ 40.000." — al no traer quién envía, se resuelve por N° de cuenta destino y se
+  // dedupea por monto+fecha (evita duplicar una transferencia propia que ya llega por Gmail).
+  (title, text) => {
+    const m = text.match(/El\s+(\d{1,2})-(\d{1,2})-(\d{4})\s+[\d:]+\s+se realiz[oó] una Transferencia hacia tu cuenta\s+(\d+)\s+por\s*\$\s*([\d.,]+)/i)
+    if (!m) return null
+    const dateStr = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+    const amt = parseInt(m[5].replace(/[^0-9]/g, ''), 10)
+    return { parser: 'santander_trf_recibida', kind: 'trf_recibida_cuenta', amt, destAccount: m[4], dateStr }
   },
 ]
 
@@ -265,6 +286,52 @@ Deno.serve(async (req) => {
     return json({
       ok: true, inserted: true, id: ins.id, parser: parsed.parser,
       sender: senderName, amount: amt, account_matched: !!destAcc, date: dateStr,
+    })
+  }
+
+  // === Rama TRANSFERENCIA RECIBIDA por N° de cuenta (sin nombre del remitente, ej. Santander) ===
+  // Se resuelve la cuenta por número exacto (no por banco) y se dedupea por monto+fecha
+  // sin filtrar "si eres tú" (no hay nombre para comparar) — así una transferencia propia
+  // que ya llegó completa por Gmail no se duplica.
+  if (parsed.kind === 'trf_recibida_cuenta') {
+    const { amt, destAccount, dateStr } = parsed
+
+    const { data: prof } = await sb.from('profiles').select('id').eq('role', 'Admin').limit(1).single()
+    if (!prof) return json({ error: 'no_profile' }, 500)
+    const profileId = prof.id as string
+
+    const { data: dup } = await sb.from('transactions')
+      .select('id, source')
+      .eq('profile_id', profileId)
+      .eq('amount', amt)
+      .eq('date', dateStr)
+      .limit(1)
+    if (dup && dup.length > 0) {
+      return json({ ok: true, inserted: false, reason: 'duplicate', existing_source: dup[0].source })
+    }
+
+    const { data: accts } = await sb.from('accounts').select('id, account_number').eq('profile_id', profileId)
+    const k = acctKey(digits(destAccount))
+    const destAcc = k ? ((accts ?? []).find(a => a.account_number && acctKey(digits(a.account_number)) === k) ?? null) : null
+
+    const { data: ins, error: insErr } = await sb.from('transactions').insert({
+      profile_id: profileId,
+      name: 'Transferencia recibida',
+      amount: amt,
+      type: 'ingreso',
+      category_id: null,
+      account_id: destAcc?.id ?? null,
+      description: null,
+      source: 'bank_app',
+      date: dateStr,
+    }).select('id').single()
+    if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
+
+    // El saldo lo sincroniza el trigger de BD (migración 006).
+
+    return json({
+      ok: true, inserted: true, id: ins.id, parser: parsed.parser,
+      amount: amt, account_matched: !!destAcc, date: dateStr,
     })
   }
 
