@@ -19,7 +19,8 @@ const LABEL    = 'norte-procesado';
 const SEARCH   = '((from:santander.cl OR from:bancochile.cl OR from:bancoripley.cl OR from:servipag.cl) '
                + 'subject:(transferencia OR Comprobante OR Transferencias OR Deuda)) '
                + 'OR (from:metlife.cl subject:(dividendo)) '
-               + 'OR (from:transaccionalcoopeuch.com subject:(Cuotas))';
+               + 'OR (from:transaccionalcoopeuch.com subject:(Cuotas)) '
+               + 'OR (from:bancoestado.cl subject:(Comprobante))';
 
 /**
  * EJECUTAR UNA SOLA VEZ antes de activar el trigger.
@@ -48,6 +49,7 @@ function procesarTransferencias() {
       else if (from.indexOf('servipag') > -1)   data = parseServipag(body);
       else if (from.indexOf('metlife') > -1)    data = parseMetlifeDividendo(body);
       else if (from.indexOf('transaccionalcoopeuch') > -1) data = parseCoopeuchCuotas(body);
+      else if (from.indexOf('bancoestado') > -1) data = parseBancoEstadoPagoProducto(body);
       if (!data) return;
 
       // Un parser puede devolver varios items (ej: "Comprobante de pago" con N cuentas pagadas)
@@ -258,6 +260,29 @@ function parseCoopeuchCuotas(txt) {
   const date = dm ? `${dm[1]}/${dm[2]}/${dm[3]}` : '';
   const last4 = g(/CUENTA\s+VISTA\s+X+(\d{4})/i, txt);
   return { kind: 'coopeuch_cuotas', amount, date, last4 };
+}
+
+// ── BancoEstado (pago de dividendo hipotecario Depto Conchalí, cuota fija mensual) ─────────
+// cuerpo (pares etiqueta/valor): "Producto: Crédito Hipotecario N° 884406380 · Cuota: 187 ·
+// Monto pagado: $142.285 · Desde: CuentaRUT N° 16798718 · N° Transacción: ... · Fecha y hora: dd/mm/yyyy hh:mm:ss"
+// "empresa" queda fijo (igual criterio que MetLife) — identifica siempre esta fuente/propiedad
+// para la regla de categoría, sin depender de parsear un nombre de producto variable.
+// OJO créditos hipotecarios por propiedad: BancoEstado→Depto Conchalí, Banco Chile→Independencia,
+// MetLife→Estación Central (no asumir por el nombre del banco sin confirmar con el usuario).
+function parseBancoEstadoPagoProducto(txt) {
+  const monto = money(txt, /Monto\s+pagado[:\s]*\$\s*([\d.,]+)/i);
+  const dm = txt.match(/Fecha\s+y\s+hora[:\s]*(\d{1,2})\/(\d{1,2})\/(\d{4})/i);
+  const date = dm ? `${dm[1]}/${dm[2]}/${dm[3]}` : '';
+  const credito = g(/Cr[eé]dito\s+Hipotecario\s+N[°º]\s*(\d+)/i, txt);
+  const cuentaRut = g(/CuentaRUT\s+N[°º]\s*(\d+)/i, txt);
+  return {
+    kind: 'pago_servicio',
+    empresa: 'BancoEstado - Dividendo Conchalí',
+    identificador: credito,
+    amount: monto,
+    date: date,
+    originAccount: cuentaRut,
+  };
 }
 
 // ── Servipag (pago de cuentas de servicio vía servipag.cl, cualquier banco como medio de pago) ──

@@ -202,6 +202,17 @@ Deno.serve(async (req) => {
     const { data: accts } = await sb.from('accounts').select('id, account_number, bank, name, type').eq('profile_id', profileId)
     const k = acctKey(digits(b.originAccount))
     let acc = k ? ((accts ?? []).find(a => a.account_number && acctKey(digits(a.account_number)) === k) ?? null) : null
+    // Respaldo: una Cuenta RUT a veces viene con el dígito verificador (lo manda el banco de
+    // origen de una transferencia, ej. Chile) y a veces sin él (el propio BancoEstado en sus
+    // comprobantes) — mismo número, largo distinto. Si el match exacto falla, comparar
+    // ignorando el último dígito de cualquiera de los dos lados.
+    if (!acc && k) {
+      acc = (accts ?? []).find(a => {
+        if (!a.account_number) return false
+        const ak = acctKey(digits(a.account_number))
+        return ak.length > 1 && k.length > 1 && (ak.slice(0, -1) === k || ak === k.slice(0, -1))
+      }) ?? null
+    }
     if (!acc) {
       const bankN = normBank(b.originBank)
       if (bankN && bankN.length >= 3) {
