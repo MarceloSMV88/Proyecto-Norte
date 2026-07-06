@@ -1,6 +1,6 @@
 'use client'
-import { useState } from 'react'
-import { X, Trash2 } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { X, Trash2, Camera } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
 import { clp } from '@/lib/utils'
@@ -47,6 +47,9 @@ export default function AccountModal({ profileId, account, onClose, onSaved }: A
   // Crédito: cupo total + deuda actual (balance se guarda como negativo)
   const [creditLimit, setCreditLimit] = useState(account?.credit_limit ? String(account.credit_limit) : '')
   const [debt, setDebt] = useState(account && account.type === 'Crédito' ? String(Math.abs(account.balance)) : '')
+  const [imageUrl, setImageUrl] = useState(account?.image_url ?? '')
+  const [uploadingImg, setUploadingImg] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const [saving, setSaving] = useState(false)
   const { showToast } = useToast()
@@ -55,6 +58,21 @@ export default function AccountModal({ profileId, account, onClose, onSaved }: A
   const accentHex = (COLORS.find(c => c.key === color) ?? COLORS[0]).hex
   const isCredit = type === 'Crédito'
   const available = num(creditLimit) - num(debt)
+
+  async function handleImagePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (file.size > 3 * 1024 * 1024) { showToast('Imagen muy pesada (máx. 3MB)'); return }
+    setUploadingImg(true)
+    const form = new FormData()
+    form.append('file', file)
+    form.append('profile_id', profileId)
+    const { data, error } = await supabase.functions.invoke('upload-account-image', { body: form })
+    setUploadingImg(false)
+    if (error || !data?.url) { showToast('No se pudo subir la imagen'); return }
+    setImageUrl(data.url)
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -68,6 +86,7 @@ export default function AccountModal({ profileId, account, onClose, onSaved }: A
       color,
       last4: isCredit ? (last4.trim() || null) : null,
       account_number: !isCredit ? (accountNumber.trim() || null) : null,
+      image_url: imageUrl || null,
     }
     if (isCredit) {
       payload.balance = -num(debt)          // deuda como negativo
@@ -107,6 +126,39 @@ export default function AccountModal({ profileId, account, onClose, onSaved }: A
         </div>
 
         <form onSubmit={handleSubmit}>
+          {/* Ícono / imagen de la cuenta: click en el bloque para subir/cambiar */}
+          <div style={{ marginBottom: 16 }}>
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              title="Click para cambiar la imagen"
+              style={{
+                width: 52, height: 52, borderRadius: 14, cursor: 'pointer',
+                background: imageUrl ? `center/cover url(${imageUrl})` : `${accentHex}20`,
+                border: `1.5px solid ${accentHex}40`, display: 'grid', placeItems: 'center', position: 'relative', overflow: 'hidden',
+              }}
+            >
+              {!imageUrl && <Camera size={18} color={accentHex} />}
+              {uploadingImg && (
+                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.45)', display: 'grid', placeItems: 'center', fontSize: 10, color: '#fff' }}>...</div>
+              )}
+              {imageUrl && !uploadingImg && (
+                <span
+                  role="button"
+                  title="Quitar imagen"
+                  onClick={e => { e.stopPropagation(); setImageUrl('') }}
+                  style={{
+                    position: 'absolute', top: 2, right: 2, width: 16, height: 16, borderRadius: '50%',
+                    background: 'rgba(0,0,0,.65)', color: '#fff', display: 'grid', placeItems: 'center',
+                  }}
+                >
+                  <X size={10} />
+                </span>
+              )}
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" onChange={handleImagePick} style={{ display: 'none' }} />
+          </div>
+
           {/* Nombre + Banco */}
           <div className="row-2">
             <div>

@@ -89,8 +89,15 @@ export default function CuentasPage() {
                   return (
                     <div key={acc.id} className="card acc-card">
                       <div className="acc-top">
-                        <div className="acc-ic" style={{ background: color + '20', border: `1.5px solid ${color}40`, fontSize: 18 }}>
-                          {isCredit ? '💳' : type === 'Ahorro' ? '🏦' : '🏧'}
+                        <div
+                          className="acc-ic"
+                          style={
+                            acc.image_url
+                              ? { background: `center/cover url(${acc.image_url})` }
+                              : { background: color + '20', border: `1.5px solid ${color}40`, fontSize: 18 }
+                          }
+                        >
+                          {!acc.image_url && (isCredit ? '💳' : type === 'Ahorro' ? '🏦' : '🏧')}
                         </div>
                         <button
                           onClick={() => setEditAcc(acc)}

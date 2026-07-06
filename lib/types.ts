@@ -46,6 +46,7 @@ export interface Account {
   last4: string | null     // últimos 4 dígitos (TC, para mapeo Google Wallet)
   account_number: string | null // N° de cuenta (Cuenta/Ahorro, para matchear transferencias por Gmail)
   color: AccentColor
+  image_url: string | null // reemplaza el ícono genérico si está seteada
   created_at: string
 }
 
