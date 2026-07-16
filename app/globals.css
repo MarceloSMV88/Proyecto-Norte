@@ -36,8 +36,18 @@ html, body { margin: 0; padding: 0; height: 100%; }
   --text: #15191c; --text-2: #545c63; --text-faint: #8a9197;
   --shadow: 0 1px 2px rgba(20,28,33,.05), 0 14px 30px -16px rgba(20,28,33,.18);
 }
+/* ---- Claymorphism theme: soft pastel base, puffy dual-tone shadows, big radii ---- */
+.app.theme-clay {
+  --bg: #eae6f6; --bg-2: #e1dbf1; --surface: #f3effb; --surface-2: #ebe4f7; --surface-3: #e2d9f2;
+  --hairline: rgba(58,46,92,0.07); --border: rgba(58,46,92,0.10); --border-strong: rgba(58,46,92,0.18);
+  --text: #2f2a47; --text-2: #6c6488; --text-faint: #9992ae;
+  --shadow: 10px 10px 22px rgba(83,63,133,.20), -8px -8px 18px rgba(255,255,255,.85);
+  --radius: 28px; --radius-sm: 20px;
+}
 .app.dens-compact { --gap: 13px; --pad: 16px; --radius: 14px; }
 .app.dens-comfy   { --gap: 24px; --pad: 28px; --radius: 22px; }
+.app.theme-clay.dens-compact { --radius: 20px; --radius-sm: 15px; }
+.app.theme-clay.dens-comfy   { --radius: 32px; --radius-sm: 24px; }
 
 /* Accent overrides */
 .app.accent-blue   { --accent: #4f93f5; }
@@ -50,6 +60,50 @@ html, body { margin: 0; padding: 0; height: 100%; }
 .cards-borde .card  { border: 1px solid var(--border); }
 .cards-sombra .card { border: 1px solid var(--hairline); box-shadow: var(--shadow); }
 .cards-glass .card  { border: 1px solid var(--border-strong); background: color-mix(in oklab, var(--surface) 78%, transparent); backdrop-filter: blur(14px) saturate(150%); }
+
+/* ---- Claymorphism card style: puffy surfaces via dual soft shadow, no hard borders ---- */
+.cards-clay .card { border: none; box-shadow: var(--shadow); }
+.cards-clay .modal {
+  border: none;
+  box-shadow: 18px 18px 42px rgba(60,45,100,.28), -12px -12px 28px rgba(255,255,255,.6);
+}
+.cards-clay .btn-primary {
+  border-radius: var(--radius-sm);
+  box-shadow: 6px 6px 14px rgba(83,63,133,.24), -4px -4px 10px rgba(255,255,255,.6);
+}
+.cards-clay .btn-primary:active { box-shadow: inset 3px 3px 8px rgba(0,0,0,.18); }
+.cards-clay .btn-soft {
+  border: none;
+  box-shadow: 5px 5px 12px rgba(83,63,133,.16), -4px -4px 10px rgba(255,255,255,.75);
+}
+.cards-clay .icon-btn.ghost {
+  border: none;
+  box-shadow: 4px 4px 9px rgba(83,63,133,.16), -3px -3px 7px rgba(255,255,255,.75);
+}
+.cards-clay .amount-field,
+.cards-clay .modal select,
+.cards-clay .text-input,
+.cards-clay .month-pick {
+  border: none;
+  box-shadow: inset 3px 3px 7px rgba(83,63,133,.14), inset -3px -3px 7px rgba(255,255,255,.8);
+}
+.cards-clay .chip {
+  border: none;
+  box-shadow: 3px 3px 8px rgba(83,63,133,.14), -2px -2px 6px rgba(255,255,255,.75);
+}
+.cards-clay .chip.on {
+  box-shadow: inset 2px 2px 5px rgba(0,0,0,.12), inset -2px -2px 5px rgba(255,255,255,.5);
+}
+.cards-clay .profile-row,
+.cards-clay .up-day,
+.cards-clay .role-pill {
+  border: none;
+  box-shadow: 3px 3px 8px rgba(83,63,133,.14), -2px -2px 6px rgba(255,255,255,.75);
+}
+.cards-clay .toast {
+  border: none;
+  box-shadow: 8px 8px 20px rgba(83,63,133,.26), -6px -6px 14px rgba(255,255,255,.5);
+}
 
 /* ---- Shell layout ---- */
 .shell { display: flex; min-height: 100vh; }

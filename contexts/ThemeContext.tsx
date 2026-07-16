@@ -33,10 +33,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const cls = [
     'app',
-    theme === 'light' ? 'theme-light' : '',
+    theme === 'light' ? 'theme-light' : theme === 'clay' ? 'theme-clay' : '',
     accent !== 'emerald' ? `accent-${accent}` : '',
     density === 'compact' ? 'dens-compact' : density === 'comfy' ? 'dens-comfy' : '',
-    'cards-borde',
+    theme === 'clay' ? 'cards-clay' : 'cards-borde',
   ].filter(Boolean).join(' ')
 
   return (

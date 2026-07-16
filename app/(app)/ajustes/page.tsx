@@ -65,7 +65,7 @@ export default function AjustesPage() {
           <div style={{ marginBottom: 20 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)', fontFamily: 'var(--font-ui)', marginBottom: 10 }}>Tema</div>
             <div style={{ display: 'flex', gap: 10 }}>
-              {([['dark', 'Oscuro', '#08090b', '#f1f3f5'], ['light', 'Claro clásico', '#f4f5f3', '#15191c']] as [Theme, string, string, string][]).map(([t, l, bg, tx]) => (
+              {([['dark', 'Oscuro', '#08090b', '#f1f3f5'], ['light', 'Claro clásico', '#f4f5f3', '#15191c'], ['clay', 'Claymorfismo', '#eae6f6', '#2f2a47']] as [Theme, string, string, string][]).map(([t, l, bg, tx]) => (
                 <button key={t} onClick={() => setTheme(t)}
                   style={{
                     flex: 1, padding: 16, borderRadius: 'var(--radius-sm)',

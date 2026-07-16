@@ -4,7 +4,7 @@ export type AccountType = 'Cuenta' | 'Crédito' | 'Ahorro'
 export type TransactionType = 'gasto' | 'ingreso' | 'transfer'
 export type UsageLevel = 'alto' | 'medio' | 'bajo'
 export type ProfileRole = 'Admin' | 'Pro'
-export type Theme = 'dark' | 'light'
+export type Theme = 'dark' | 'light' | 'clay'
 export type Density = 'compact' | 'normal' | 'comfy'
 export type CommitmentStatus = 'pendiente' | 'detectado' | 'pagado' | 'vencido' | 'omitido' | 'sin_gasto'
 
