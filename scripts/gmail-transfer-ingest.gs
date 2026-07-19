@@ -20,7 +20,8 @@ const SEARCH   = '((from:santander.cl OR from:bancochile.cl OR from:bancoripley.
                + 'subject:(transferencia OR Comprobante OR Transferencias OR Deuda)) '
                + 'OR (from:metlife.cl subject:(dividendo)) '
                + 'OR (from:transaccionalcoopeuch.com subject:(Cuotas)) '
-               + 'OR (from:bancoestado.cl subject:(Comprobante))';
+               + 'OR (from:bancoestado.cl subject:(Comprobante OR Transferencias)) '
+               + 'OR (from:indexa.cl subject:("Aviso de Pagos"))';
 
 /**
  * EJECUTAR UNA SOLA VEZ antes de activar el trigger.
@@ -49,13 +50,26 @@ function procesarTransferencias() {
       else if (from.indexOf('servipag') > -1)   data = parseServipag(body);
       else if (from.indexOf('metlife') > -1)    data = parseMetlifeDividendo(body);
       else if (from.indexOf('transaccionalcoopeuch') > -1) data = parseCoopeuchCuotas(body);
-      else if (from.indexOf('bancoestado') > -1) data = parseBancoEstadoPagoProducto(body);
+      else if (from.indexOf('bancoestado') > -1) {
+        // Dos plantillas: "Transferencias - Cuentas Propias" (traspaso interno) y
+        // "Comprobante pago de producto" (dividendo hipotecario Conchalí).
+        data = /transferencia entre tus cuentas/i.test(body)
+          ? parseBancoEstadoCtasPropias(body)
+          : parseBancoEstadoPagoProducto(body);
+      }
+      // indexa.cl manda HTML puro (iso-8859-1, sin parte text/plain): getPlainBody() puede
+      // venir vacío -> fallback al HTML crudo (el parser limpia tags/entidades él mismo).
+      else if (from.indexOf('indexa') > -1)      data = parseAssetplanPago(body && body.trim() ? body : msg.getBody());
       if (!data) return;
 
       // Un parser puede devolver varios items (ej: "Comprobante de pago" con N cuentas pagadas)
       const items = Array.isArray(data) ? data : [data];
       items.forEach(d => {
-        if (!d || !d.amount) return;
+        if (!d) return;
+        // Si el parser matcheó el remitente pero no extrajo monto, se manda igual con el
+        // cuerpo crudo: transfer-ingest lo registra en ingest_failures (bad_amount) en vez
+        // de perderse en silencio con el hilo ya etiquetado como procesado.
+        if (!d.amount) d = { kind: 'parse_failed', from: from, raw: (body || msg.getBody()).slice(0, 2000) };
         UrlFetchApp.fetch(ENDPOINT, {
           method: 'post', contentType: 'application/json',
           headers: { 'x-ingest-secret': SECRET },
@@ -285,6 +299,36 @@ function parseBancoEstadoPagoProducto(txt) {
   };
 }
 
+// ── BancoEstado — "Transferencias - Cuentas Propias" (traspaso interno, ej. CuentaRUT → Ahorro Premium) ──
+// asunto "Transferencias - Cuentas Propias", cuerpo con pares etiqueta/valor:
+//   "Has realizado una transferencia entre tus cuentas" · Monto $200.000 · Hacia 33961660195 ·
+//   Desde 16798718 · Mensaje · Fecha y hora 08/07/2026 23:26:58 · N° transacción 8094763
+// OJO: BancoEstado escribe la CuentaRUT SIN dígito verificador — transfer-ingest v13 la
+// matchea igual (fallback ignorando el último dígito, ahora también en la rama genérica).
+// Va por la rama genérica: ambas cuentas propias => 'transfer' con 2 patas.
+function parseBancoEstadoCtasPropias(raw) {
+  // Misma limpieza que Assetplan: getPlainBody convierte negritas en asteriscos y parte
+  // líneas — se quitan tags/entidades/asteriscos y se colapsan saltos antes de parsear.
+  const txt = raw.replace(/<[^>]+>/g, ' ')
+    .replace(/&aacute;/gi, 'á').replace(/&eacute;/gi, 'é').replace(/&iacute;/gi, 'í')
+    .replace(/&oacute;/gi, 'ó').replace(/&uacute;/gi, 'ú').replace(/&ntilde;/gi, 'ñ')
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&deg;/gi, '°')
+    .replace(/\*/g, ' ').replace(/[\r\n]+/g, ' ');
+  const dm = txt.match(/Fecha\s+y\s+hora[\s:]*(\d{1,2})\/(\d{1,2})\/(\d{4})/i);
+  return {
+    amount:        g(/Monto[\s:]*\$\s*([\d.,]+)/i, txt).replace(/\./g, ''),
+    date:          dm ? dm[1] + '/' + dm[2] + '/' + dm[3] : '',
+    originMine:    true,
+    destMine:      true,
+    originAccount: g(/Desde[\s:]*(\d{6,})/i, txt),
+    destAccount:   g(/Hacia[\s:]*(\d{6,})/i, txt),
+    originBank:    'BancoEstado',
+    destBank:      'BancoEstado',
+    txnId:         g(/N[°º]\s*transacci[oó]n[\s:]*(\d+)/i, txt),
+    comment:       g(/Mensaje[\s:]*([^\n\r]*?)\s*Fecha\s+y\s+hora/i, txt),
+  };
+}
+
 // ── Servipag (pago de cuentas de servicio vía servipag.cl, cualquier banco como medio de pago) ──
 // Plantilla con 2 tablas ANCHAS (fila de encabezados + fila de valores, no pares etiqueta/valor):
 //   Resumen de pago:  Nombre | Fecha | Hora transacción | Número de consulta | Valor | Forma de pago
@@ -328,6 +372,44 @@ function parseMetlifeDividendo(txt) {
     identificador: dividendoNum,
     amount: amount,
     date: date,
+  };
+}
+
+// ── Assetplan (arriendos percibidos por los deptos, vía Banco Internacional / indexa.cl) ──
+// Remitente "Banco Internacional Informa" <Produccion@indexa.cl>, asunto
+// "Internacional SAM FO - Aviso de Pagos - Exitoso". Cuerpo de un solo párrafo:
+//   "Por instrucción de la empresa ASSETPLAN RECAUDACION SPA hemos realizado un pago
+//    electrónico a la cuenta 62610654 de Banco Santander para realizar un pago por
+//    $ 237.977 con fecha efectiva 7 de julio del 2026."
+// Es un INGRESO (arriendo). Va por la rama genérica de transfer-ingest: destino = cuenta
+// propia (match por número de cuenta), origen = tercero (Assetplan) => clasifica 'ingreso'.
+// OJO: la fecha viene larga y con "del" ("7 de julio del 2026") — fechaChile() solo cubre
+// "de", por eso el regex propio acepta ambas.
+// Verificado (2026-07-07): Santander NO manda notificación de app por estos pagos
+// electrónicos — este mail es la única fuente, sin riesgo de duplicar con notif-ingest.
+function parseAssetplanPago(raw) {
+  // Puede llegar texto plano O el HTML crudo (fallback del dispatch): se limpian tags y
+  // se decodifican las entidades (&oacute; etc.) acá mismo, sin depender de getPlainBody.
+  // OJO (visto con el payload real en ingest_failures): getPlainBody convierte las negritas
+  // <strong> en ASTERISCOS ("pago por *$ 237.977*") y parte las líneas a mitad de frase —
+  // se quitan los * y se colapsan los saltos de línea antes de parsear.
+  const txt = raw.replace(/<[^>]+>/g, ' ')
+    .replace(/&aacute;/gi, 'á').replace(/&eacute;/gi, 'é').replace(/&iacute;/gi, 'í')
+    .replace(/&oacute;/gi, 'ó').replace(/&uacute;/gi, 'ú').replace(/&ntilde;/gi, 'ñ')
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&')
+    .replace(/\*/g, ' ').replace(/[\r\n]+/g, ' ');
+  const empresa = g(/instrucci[oó]n de la empresa\s+([^\n\r]+?)\s+hemos/i, txt) || 'Assetplan';
+  const m = txt.match(/(\d{1,2})\s+de\s+([a-záéíóú]+)\s+del?\s+(\d{4})/i);
+  const date = m && MESES_ES[m[2].toLowerCase()]
+    ? m[1] + '/' + MESES_ES[m[2].toLowerCase()] + '/' + m[3] : '';
+  return {
+    amount:      money(txt, /pago por\s*\$\s*([\d.,]+)/i),
+    date:        date,
+    originName:  empresa,
+    destAccount: g(/a la cuenta\s+([\d.\-]+)/i, txt),
+    destBank:    g(/cuenta\s+[\d.\-]+\s+de\s+(Banco\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+|[A-Za-zÁÉÍÓÚÑáéíóúñ]+)/i, txt) || 'Santander',
+    destMine:    true,
+    comment:     'Arriendo Assetplan',
   };
 }
 

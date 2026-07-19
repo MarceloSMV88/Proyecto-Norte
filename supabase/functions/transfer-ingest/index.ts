@@ -280,7 +280,18 @@ Deno.serve(async (req) => {
   const { data: accts } = await sb.from('accounts').select('id, account_number, bank, name, type').eq('profile_id', profileId)
   const byNumber = (d: string) => {
     const k = acctKey(d)
-    return k ? ((accts ?? []).find(a => a.account_number && acctKey(digits(a.account_number)) === k) ?? null) : null
+    if (!k) return null
+    const exact = (accts ?? []).find(a => a.account_number && acctKey(digits(a.account_number)) === k)
+    if (exact) return exact
+    // Cuenta RUT: llega CON dígito verificador cuando la escribe un banco externo y SIN él
+    // cuando la escribe el propio BancoEstado (ej. "Desde 16798718" vs guardada 167987184).
+    // Mismo respaldo que la rama pago_servicio: reintentar ignorando el último dígito de
+    // cualquiera de los dos lados.
+    return (accts ?? []).find(a => {
+      if (!a.account_number) return false
+      const ak = acctKey(digits(a.account_number))
+      return ak.length > 1 && k.length > 1 && (ak.slice(0, -1) === k || ak === k.slice(0, -1))
+    }) ?? null
   }
   const byBank = (bn: string) => {
     if (!bn || bn.length < 3) return null
@@ -313,6 +324,18 @@ Deno.serve(async (req) => {
     if (sharesAcct || samePair || sameTx) return json({ ok: true, inserted: false, reason: 'duplicate', matched: c.id })
   }
 
+  // Dedup cross-fuente: la misma transferencia ya pudo llegar por notificación push
+  // (notif-ingest, source 'bank_app') antes que por este mail — el push llega casi al
+  // instante, el mail se procesa por polling. bank_app no escribe tags #oa/#da en la
+  // descripción, así que el match es por fecha + monto + cuenta ya resuelta de cada lado.
+  const { data: bankAppCands } = await sb.from('transactions').select('id, amount, account_id')
+    .eq('profile_id', profileId).eq('source', 'bank_app').eq('date', dateStr).or(`amount.eq.${-amount},amount.eq.${amount}`)
+  const bankAppDup = (bankAppCands ?? []).find(c =>
+    (c.amount === -amount && originAcc && c.account_id === originAcc.id) ||
+    (c.amount === amount && destAcc && c.account_id === destAcc.id)
+  )
+  if (bankAppDup) return json({ ok: true, inserted: false, reason: 'duplicate', matched: bankAppDup.id })
+
   const description = `${comment ? comment + ' ' : ''}#oa:${originAcctD} #da:${destAcctD} #ob:${originBankN} #db:${destBankN} #tx:${txnId}`.trim()
 
   // Categoría por reglas SOLO para gasto (transfer/ingreso entre tus propias cuentas o de
@@ -334,6 +357,17 @@ Deno.serve(async (req) => {
     }
   }
 
+  // Aporte a ahorro: TODO lo que entra a la cuenta "Ahorro Premium" cuenta en el presupuesto
+  // como "Ahorro - Personal" (pedido del usuario 2026-07-09). Mismo criterio que
+  // coopeuch_cuotas: se categoriza la pata POSITIVA del transfer y la migración 008 la suma
+  // al Gastado de la categoría. Si la categoría no existe ese mes, queda sin categoría.
+  let savingsCategoryId: string | null = null
+  if (txType === 'transfer' && destAcc && /ahorro premium/i.test(destAcc.name)) {
+    const { data: cat } = await sb.from('categories').select('id')
+      .eq('profile_id', profileId).eq('name', 'Ahorro - Personal').eq('month', month).limit(1).maybeSingle()
+    if (cat) savingsCategoryId = cat.id
+  }
+
   // Patas (legs): interna => 2 movimientos (origen - / destino +)
   type Leg = { account_id: string | null; amount: number; name: string }
   const legs: Leg[] = []
@@ -347,7 +381,7 @@ Deno.serve(async (req) => {
     legs.push({ account_id: originAcc?.id ?? null, amount: -amount, name: `Transferencia a ${destName || 'tercero'}` })
   }
 
-  const rows = legs.map(l => ({ profile_id: profileId, name: l.name, amount: l.amount, type: txType, category_id: txType === 'gasto' ? gastoCategoryId : null, account_id: l.account_id, description, source: 'gmail_transfer', date: dateStr }))
+  const rows = legs.map(l => ({ profile_id: profileId, name: l.name, amount: l.amount, type: txType, category_id: txType === 'gasto' ? gastoCategoryId : (l.amount > 0 ? savingsCategoryId : null), account_id: l.account_id, description, source: 'gmail_transfer', date: dateStr }))
   const { data: ins, error: insErr } = await sb.from('transactions').insert(rows).select('id')
   if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
 

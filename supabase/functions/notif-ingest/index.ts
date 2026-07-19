@@ -73,6 +73,7 @@ type Parsed =
       amt: number
       destAccount: string  // n° de cuenta destino (la notificación no trae nombre del remitente)
       dateStr: string | null
+      timeStr: string | null // hh:mm:ss de la notificación — distingue transferencias del mismo monto el mismo día
     }
 
 type ParserFn = (title: string, text: string) => Parsed | null
@@ -132,14 +133,15 @@ const parsers: ParserFn[] = [
   },
   // Banco Santander — transferencia recibida (formato minimal, SIN nombre del remitente).
   // cuerpo: "El 05-07-2026 12:14:06 se realizó una Transferencia hacia tu cuenta 000062610654
-  // por $ 40.000." — al no traer quién envía, se resuelve por N° de cuenta destino y se
-  // dedupea por monto+fecha (evita duplicar una transferencia propia que ya llega por Gmail).
+  // por $ 40.000." — al no traer quién envía, se resuelve por N° de cuenta destino. La HORA
+  // exacta (hh:mm:ss) se captura para el dedup: es lo único que distingue dos transferencias
+  // legítimas del mismo monto el mismo día (ej. varios amigos pagando la misma cuota).
   (title, text) => {
-    const m = text.match(/El\s+(\d{1,2})-(\d{1,2})-(\d{4})\s+[\d:]+\s+se realiz[oó] una Transferencia hacia tu cuenta\s+(\d+)\s+por\s*\$\s*([\d.,]+)/i)
+    const m = text.match(/El\s+(\d{1,2})-(\d{1,2})-(\d{4})\s+([\d:]+)\s+se realiz[oó] una Transferencia hacia tu cuenta\s+(\d+)\s+por\s*\$\s*([\d.,]+)/i)
     if (!m) return null
     const dateStr = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
-    const amt = parseInt(m[5].replace(/[^0-9]/g, ''), 10)
-    return { parser: 'santander_trf_recibida', kind: 'trf_recibida_cuenta', amt, destAccount: m[4], dateStr }
+    const amt = parseInt(m[6].replace(/[^0-9]/g, ''), 10)
+    return { parser: 'santander_trf_recibida', kind: 'trf_recibida_cuenta', amt, destAccount: m[5], dateStr, timeStr: m[4] }
   },
 ]
 
@@ -250,12 +252,16 @@ Deno.serve(async (req) => {
       return json({ ok: true, inserted: false, reason: 'internal_gmail_handles', sender: senderName })
     }
 
-    // Dedup: mismo monto (+) el mismo día para el perfil, cualquier fuente
+    // Dedup: misma transferencia re-notificada = mismo REMITENTE + monto + fecha (2026-07-08:
+    // antes era monto+fecha contra cualquier fuente y descartaba transferencias legítimas de
+    // remitentes distintos por el mismo monto el mismo día). Limitación aceptada: el mismo
+    // remitente enviando 2 veces el mismo monto el mismo día sí se dedupea.
     const { data: dup } = await sb.from('transactions')
       .select('id, source')
       .eq('profile_id', profileId)
       .eq('amount', amt)
       .eq('date', dateStr)
+      .eq('name', `Transferencia de ${senderName}`)
       .limit(1)
     if (dup && dup.length > 0) {
       return json({ ok: true, inserted: false, reason: 'duplicate', existing_source: dup[0].source })
@@ -290,24 +296,30 @@ Deno.serve(async (req) => {
   }
 
   // === Rama TRANSFERENCIA RECIBIDA por N° de cuenta (sin nombre del remitente, ej. Santander) ===
-  // Se resuelve la cuenta por número exacto (no por banco) y se dedupea por monto+fecha
-  // sin filtrar "si eres tú" (no hay nombre para comparar) — así una transferencia propia
-  // que ya llegó completa por Gmail no se duplica.
+  // Se resuelve la cuenta por número exacto (no por banco). Dedup v2 (2026-07-08): antes era
+  // monto+fecha contra cualquier fuente y se COMÍA transferencias legítimas del mismo monto
+  // el mismo día (5 amigos pagando la misma cuota → entraba solo la primera). Ahora:
+  //   - misma notificación re-entregada: ya existe fila con el mismo token #nt (fecha+hora exacta)
+  //   - transferencia propia ya registrada por Gmail: fila gmail_transfer mismo monto y fecha
+  //     (el mail del banco de origen no trae hora → se mantiene el match por fecha solo ahí)
   if (parsed.kind === 'trf_recibida_cuenta') {
-    const { amt, destAccount, dateStr } = parsed
+    const { amt, destAccount, dateStr, timeStr } = parsed
 
     const { data: prof } = await sb.from('profiles').select('id').eq('role', 'Admin').limit(1).single()
     if (!prof) return json({ error: 'no_profile' }, 500)
     const profileId = prof.id as string
 
-    const { data: dup } = await sb.from('transactions')
-      .select('id, source')
+    const ntToken = timeStr ? `#nt:${dateStr} ${timeStr}` : null
+    const { data: dups } = await sb.from('transactions')
+      .select('id, source, description')
       .eq('profile_id', profileId)
       .eq('amount', amt)
       .eq('date', dateStr)
-      .limit(1)
-    if (dup && dup.length > 0) {
-      return json({ ok: true, inserted: false, reason: 'duplicate', existing_source: dup[0].source })
+    const dupHit = (dups ?? []).find(d =>
+      d.source === 'gmail_transfer' || (ntToken && String(d.description ?? '').includes(ntToken))
+    )
+    if (dupHit) {
+      return json({ ok: true, inserted: false, reason: 'duplicate', existing_source: dupHit.source })
     }
 
     const { data: accts } = await sb.from('accounts').select('id, account_number').eq('profile_id', profileId)
@@ -321,7 +333,7 @@ Deno.serve(async (req) => {
       type: 'ingreso',
       category_id: null,
       account_id: destAcc?.id ?? null,
-      description: null,
+      description: ntToken,
       source: 'bank_app',
       date: dateStr,
     }).select('id').single()
@@ -363,15 +375,17 @@ Deno.serve(async (req) => {
     if (matches.length === 1) accountId = matches[0].id
   }
 
-  // 5) Dedup entre fuentes: mismo perfil + mismo monto en los últimos 15 min
-  //    (sin comparar nombre: Wallet y la app del banco escriben el comercio distinto)
-  const windowAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString()
-  const { data: dup } = await sb.from('transactions')
+  // 5) Dedup entre fuentes: mismo perfil + mismo monto + misma fecha (y misma cuenta si ya
+  // se resolvió). Antes era una ventana de 15 min sobre created_at, pero Wallet puede demorar
+  // bastante en notificar la misma compra (visto: 78 min de diferencia) y se escapaba del
+  // dedup — por fecha+cuenta es más robusto que perseguir un timestamp relativo.
+  let dupQuery = sb.from('transactions')
     .select('id, source')
     .eq('profile_id', profileId)
     .eq('amount', -amt)
-    .gte('created_at', windowAgo)
-    .limit(1)
+    .eq('date', dateStr)
+  if (accountId) dupQuery = dupQuery.eq('account_id', accountId)
+  const { data: dup } = await dupQuery.limit(1)
   if (dup && dup.length > 0) {
     return json({ ok: true, inserted: false, reason: 'duplicate', existing_source: dup[0].source })
   }
@@ -415,11 +429,27 @@ Deno.serve(async (req) => {
 
   // El saldo lo sincroniza el trigger de BD (migración 006).
 
+  // 8) Anti-carrera con wallet-ingest: una compra NFC la notifican la app del banco y Wallet,
+  // a veces con minutos u horas de diferencia (Wallet puede demorar bastante en avisar; visto:
+  // 78 min). Regla: el registro del banco manda. Si existe una fila google_wallet por la misma
+  // cuenta+monto+fecha, se borra ESA (el trigger de BD reversa su saldo). wallet-ingest hace el
+  // chequeo espejo borrando la suya, así cualquier orden de commit converge a una sola fila.
+  let walletDupRemoved = false
+  let walletDupQuery = sb.from('transactions').select('id')
+    .eq('profile_id', profileId).eq('amount', -amt).eq('source', 'google_wallet').eq('date', dateStr)
+  if (accountId) walletDupQuery = walletDupQuery.eq('account_id', accountId)
+  const { data: walletDup } = await walletDupQuery.limit(1)
+  if (walletDup && walletDup.length > 0) {
+    await sb.from('transactions').delete().eq('id', walletDup[0].id)
+    walletDupRemoved = true
+  }
+
   return json({
     ok: true,
     inserted: true,
     id: ins.id,
     parser: parsed.parser,
+    wallet_dup_removed: walletDupRemoved,
     merchant,
     amount: amt,
     last4,

@@ -141,6 +141,22 @@ Deno.serve(async (req) => {
 
   // El saldo de la cuenta lo sincroniza el trigger de BD (migración 006), no la función.
 
+  // 8) Anti-carrera con notif-ingest: una compra NFC la notifican Wallet y la app del banco,
+  // a veces con minutos u horas de diferencia (Wallet puede demorar bastante en avisar; visto
+  // en un caso real: 78 min entre ambas notificaciones, fuera de cualquier ventana de minutos
+  // razonable). Se compara por cuenta+monto+fecha en vez de una ventana sobre created_at.
+  // Regla: el registro del banco manda. Si tras insertar ya existe una fila bank_app por la
+  // misma cuenta+monto+fecha, esta fila de Wallet se borra (el trigger de BD reversa el saldo).
+  // notif-ingest hace el chequeo espejo, así cualquier orden de commit converge a una sola fila.
+  let bankRowQuery = sb.from('transactions').select('id')
+    .eq('profile_id', profileId).eq('amount', -amt).eq('source', 'bank_app').eq('date', dateStr)
+  if (accountId) bankRowQuery = bankRowQuery.eq('account_id', accountId)
+  const { data: bankRow } = await bankRowQuery.limit(1)
+  if (bankRow && bankRow.length > 0) {
+    await sb.from('transactions').delete().eq('id', ins.id)
+    return json({ ok: true, inserted: false, reason: 'duplicate_post', kept: bankRow[0].id })
+  }
+
   return json({
     ok: true,
     inserted: true,
