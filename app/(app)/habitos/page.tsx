@@ -141,7 +141,7 @@ export default function HabitosPage() {
                     {cat.name}
                   </div>
                   <div className="hbar-track">
-                    <div className="hbar-fill" style={{ width: `${(cat.spent / maxCatSpent) * 100}%`, background: COLOR_HEX[cat.color] || 'var(--accent)' }} />
+                    <div className="hbar-fill" style={{ transform: `scaleX(${cat.spent / maxCatSpent})`, background: COLOR_HEX[cat.color] || 'var(--accent)' }} />
                   </div>
                   <div className="hbar-val">{clpShort(cat.spent)}</div>
                 </div>

@@ -4,6 +4,7 @@ import { X, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
 import { useEscapeClose } from '@/lib/useEscapeClose'
+import { useAnimatedClose } from '@/lib/useAnimatedClose'
 import { ICON_CATALOG, catEmoji } from '@/lib/icons'
 import type { Category, CategoryGroup, AccentColor } from '@/lib/types'
 
@@ -37,7 +38,8 @@ export default function CategoryModal({ profileId, month, category, defaultGroup
   const [saving, setSaving] = useState(false)
   const { showToast } = useToast()
   const supabase = createClient()
-  useEscapeClose(onClose)
+  const { closing, close } = useAnimatedClose(onClose)
+  useEscapeClose(close)
 
   const assignedN = parseInt(assigned.replace(/\D/g, '')) || 0
   const formattedAssigned = assignedN > 0 ? assignedN.toLocaleString('es-CL') : ''
@@ -65,7 +67,7 @@ export default function CategoryModal({ profileId, month, category, defaultGroup
     setSaving(false)
     if (error) { showToast('Error al guardar'); return }
     showToast(isEdit ? '✓ Categoría actualizada' : '✓ Categoría creada')
-    onSaved(); onClose()
+    onSaved(); close()
   }
 
   async function handleDelete() {
@@ -76,20 +78,20 @@ export default function CategoryModal({ profileId, month, category, defaultGroup
     setSaving(false)
     if (error) { showToast('Error al eliminar'); return }
     showToast('✓ Categoría eliminada')
-    onSaved(); onClose()
+    onSaved(); close()
   }
 
   const accentHex = (COLORS.find(c => c.key === color) ?? COLORS[0]).hex
 
   return (
-    <div className="modal-scrim" onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="modal-scrim" data-closing={closing || undefined} onClick={e => e.target === e.currentTarget && close()}>
       <div className="modal" style={{ borderTop: `3px solid ${accentHex}` }}>
         <div className="modal-head">
           <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 18 }}>{catEmoji(icon)}</span>
             {isEdit ? 'Editar categoría' : 'Nueva categoría'}
           </h3>
-          <button type="button" onClick={onClose} className="icon-btn ghost sm">
+          <button type="button" onClick={close} className="icon-btn ghost sm">
             <X size={16} />
           </button>
         </div>

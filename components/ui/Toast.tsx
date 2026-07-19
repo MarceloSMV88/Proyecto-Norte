@@ -6,15 +6,25 @@ const ToastContext = createContext<ToastContextValue | null>(null)
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [msg, setMsg] = useState<string | null>(null)
+  const [closing, setClosing] = useState(false)
   const showToast = useCallback((m: string) => {
+    setClosing(false)
     setMsg(m)
-    setTimeout(() => setMsg(null), 2600)
+    setTimeout(() => setClosing(true), 2600)
   }, [])
 
   return (
     <ToastContext.Provider value={{ showToast }}>
       {children}
-      {msg && <div className="toast">{msg}</div>}
+      {msg && (
+        <div
+          className="toast"
+          data-closing={closing || undefined}
+          onAnimationEnd={() => { if (closing) setMsg(null) }}
+        >
+          {msg}
+        </div>
+      )}
     </ToastContext.Provider>
   )
 }

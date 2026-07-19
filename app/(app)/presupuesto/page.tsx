@@ -230,7 +230,7 @@ export default function PresupuestoPage() {
 
                       <div className="bcat-prog">
                         <div className="progress-track" style={{ marginBottom: 3 }}>
-                          <div className="progress-fill" style={{ width: `${Math.min(100, pct * 100)}%`, background: status }} />
+                          <div className="progress-fill" style={{ transform: `scaleX(${Math.min(1, pct)})`, background: status }} />
                         </div>
                         <div style={{ fontSize: 11, color: status }}>{clp(cat.spent)}</div>
                       </div>
@@ -391,7 +391,7 @@ function TopSpendBars({ categories }: { categories: Category[] }) {
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{cat.name}</span>
               </div>
               <div className="hbar-track">
-                <div className="hbar-fill" style={{ width: `${(cat.spent / max) * 100}%`, background: COLOR_HEX[cat.color] || 'var(--accent)' }} />
+                <div className="hbar-fill" style={{ transform: `scaleX(${cat.spent / max})`, background: COLOR_HEX[cat.color] || 'var(--accent)' }} />
               </div>
               <div className="hbar-val">{clp(cat.spent)}</div>
             </div>

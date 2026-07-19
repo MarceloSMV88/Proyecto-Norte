@@ -12,8 +12,8 @@ export default function BarPairs({ data }: { data: Bar[] }) {
       {data.map((d, i) => (
         <div key={i} className="barpair">
           <div className="barpair-cols">
-            <div className={`bar bar-income`} style={{ height: Math.max(2, (d.income / max) * h), opacity: d.partial ? 0.65 : 1 }} />
-            <div className={`bar bar-expense${d.partial ? ' partial' : ''}`} style={{ height: Math.max(2, (d.expense / max) * h), opacity: d.partial ? 0.65 : 1 }} />
+            <div className={`bar bar-income`} style={{ transform: `scaleY(${Math.max(2 / h, d.income / max)})`, opacity: d.partial ? 0.65 : 1 }} />
+            <div className={`bar bar-expense${d.partial ? ' partial' : ''}`} style={{ transform: `scaleY(${Math.max(2 / h, d.expense / max)})`, opacity: d.partial ? 0.65 : 1 }} />
           </div>
           <span className="barpair-label">{d.m}</span>
         </div>

@@ -4,6 +4,7 @@ import { X, Flag } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
 import { useEscapeClose } from '@/lib/useEscapeClose'
+import { useAnimatedClose } from '@/lib/useAnimatedClose'
 import type { AccentColor, Goal } from '@/lib/types'
 
 const COLORS: { key: AccentColor; hex: string; label: string }[] = [
@@ -31,7 +32,8 @@ export default function GoalModal({ profileId, goal, onClose, onSaved }: GoalMod
   const [saving, setSaving]   = useState(false)
   const { showToast } = useToast()
   const supabase = createClient()
-  useEscapeClose(onClose)
+  const { closing, close } = useAnimatedClose(onClose)
+  useEscapeClose(close)
 
   const selectedColor = COLORS.find(c => c.key === color)!
   const n = parseInt(target.replace(/\D/g, '')) || 0
@@ -57,18 +59,18 @@ export default function GoalModal({ profileId, goal, onClose, onSaved }: GoalMod
     setSaving(false)
     if (error) { showToast('Error al guardar'); return }
     showToast(isEdit ? '✓ Meta actualizada' : '✓ Meta creada')
-    onSaved(); onClose()
+    onSaved(); close()
   }
 
   return (
-    <div className="modal-scrim" onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="modal-scrim" data-closing={closing || undefined} onClick={e => e.target === e.currentTarget && close()}>
       <div className="modal" style={{ borderTop: `3px solid ${selectedColor.hex}` }}>
         <div className="modal-head">
           <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Flag size={17} style={{ color: selectedColor.hex }} />
             {isEdit ? 'Editar meta' : 'Nueva meta'}
           </h3>
-          <button type="button" onClick={onClose} className="icon-btn ghost sm">
+          <button type="button" onClick={close} className="icon-btn ghost sm">
             <X size={16} />
           </button>
         </div>

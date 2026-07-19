@@ -180,7 +180,7 @@ export default function ResumenPage() {
             {isCurrentMonth && paceState && (
             <div className="pace">
               <div className="pace-bar">
-                <div className="pace-fill" style={{ width: `${pacePct}%`, ...(paceColor ? { background: paceColor } : {}) }} />
+                <div className="pace-fill" style={{ transform: `scaleX(${pacePct / 100})`, ...(paceColor ? { background: paceColor } : {}) }} />
                 <div className="pace-marker" style={{ left: `${markerPct}%` }}><span>hoy</span></div>
               </div>
               <div className="pace-legend">
@@ -297,7 +297,7 @@ export default function ResumenPage() {
                         </span>
                         <span className="brow-mid">
                           <div className="progress" style={{ height: 5 }}>
-                            <div className="progress-fill" style={{ width: `${Math.min(100, cat.assigned > 0 ? (cat.spent/cat.assigned)*100 : 0)}%`, background: state === 'red' ? 'var(--danger)' : state === 'amber' ? 'var(--warn)' : 'var(--ok)', height: '100%' }} />
+                            <div className="progress-fill" style={{ transform: `scaleX(${Math.min(1, cat.assigned > 0 ? cat.spent/cat.assigned : 0)})`, background: state === 'red' ? 'var(--danger)' : state === 'amber' ? 'var(--warn)' : 'var(--ok)' }} />
                           </div>
                           <span className="brow-nums">{clp(cat.spent)} <i>de {clp(cat.assigned)}</i></span>
                         </span>
@@ -421,7 +421,7 @@ export default function ResumenPage() {
                           <span className="goal-pct">{pct}%</span>
                         </div>
                         <div className="progress" style={{ height: 6 }}>
-                          <div className="progress-fill" style={{ width: `${Math.min(100, pct)}%`, background: color, height: '100%' }} />
+                          <div className="progress-fill" style={{ transform: `scaleX(${Math.min(1, pct / 100)})`, background: color }} />
                         </div>
                         <div className="goal-bot">
                           <span>{clp(g.current)} <i>de {clp(g.target)}</i></span>

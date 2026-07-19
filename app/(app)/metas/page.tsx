@@ -86,7 +86,7 @@ export default function MetasPage() {
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <div className="progress-track">
-                    <div className="progress-fill" style={{ width: `${Math.min(100, pct * 100)}%`, background: color }} />
+                    <div className="progress-fill" style={{ transform: `scaleX(${Math.min(1, pct)})`, background: color }} />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-2)' }}>
                     <span>{clpShort(g.current)} ahorrado</span>

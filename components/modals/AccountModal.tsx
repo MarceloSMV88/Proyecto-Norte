@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
 import { clp } from '@/lib/utils'
 import { useEscapeClose } from '@/lib/useEscapeClose'
+import { useAnimatedClose } from '@/lib/useAnimatedClose'
 import type { Account, AccountType, AccentColor } from '@/lib/types'
 
 const TYPES: { key: AccountType; label: string }[] = [
@@ -33,7 +34,8 @@ const num = (s: string) => parseInt(s.replace(/\D/g, '')) || 0
 
 export default function AccountModal({ profileId, account, onClose, onSaved }: AccountModalProps) {
   const isEdit = !!account
-  useEscapeClose(onClose)
+  const { closing, close } = useAnimatedClose(onClose)
+  useEscapeClose(close)
   const validColor = (c?: string): AccentColor => (COLORS.some(x => x.key === c) ? c as AccentColor : 'emerald')
 
   const [name, setName] = useState(account?.name ?? '')
@@ -103,7 +105,7 @@ export default function AccountModal({ profileId, account, onClose, onSaved }: A
     setSaving(false)
     if (error) { showToast('Error al guardar'); return }
     showToast(isEdit ? '✓ Cuenta actualizada' : '✓ Cuenta agregada')
-    onSaved(); onClose()
+    onSaved(); close()
   }
 
   async function handleDelete() {
@@ -114,15 +116,15 @@ export default function AccountModal({ profileId, account, onClose, onSaved }: A
     setSaving(false)
     if (error) { showToast('Error al eliminar'); return }
     showToast('✓ Cuenta eliminada')
-    onSaved(); onClose()
+    onSaved(); close()
   }
 
   return (
-    <div className="modal-scrim" onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="modal-scrim" data-closing={closing || undefined} onClick={e => e.target === e.currentTarget && close()}>
       <div className="modal" style={{ borderTop: `3px solid ${accentHex}` }}>
         <div className="modal-head">
           <h3>{isEdit ? 'Editar cuenta' : 'Nueva cuenta'}</h3>
-          <button type="button" onClick={onClose} className="icon-btn ghost sm"><X size={16} /></button>
+          <button type="button" onClick={close} className="icon-btn ghost sm"><X size={16} /></button>
         </div>
 
         <form onSubmit={handleSubmit}>

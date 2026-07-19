@@ -7,6 +7,7 @@ import DatePicker from '@/components/ui/DatePicker'
 import { catEmoji } from '@/lib/icons'
 import { todayCL } from '@/lib/utils'
 import { useEscapeClose } from '@/lib/useEscapeClose'
+import { useAnimatedClose } from '@/lib/useAnimatedClose'
 import type { TransactionType, Category, Account } from '@/lib/types'
 
 type ModalType = 'gasto' | 'ingreso' | 'mover'
@@ -34,7 +35,8 @@ export default function TransactionModal({ type, profileId, categories, accounts
   const [saving, setSaving] = useState(false)
   const { showToast } = useToast()
   const supabase = createClient()
-  useEscapeClose(onClose)
+  const { closing, close } = useAnimatedClose(onClose)
+  useEscapeClose(close)
   const cfg = CONFIG[type]
 
   const n = parseInt(rawAmount.replace(/\D/g, '')) || 0
@@ -82,15 +84,15 @@ export default function TransactionModal({ type, profileId, categories, accounts
     if (error) { showToast('Error al guardar'); return }
     showToast('✓ Registrado')
     onSaved(date)
-    onClose()
+    close()
   }
 
   return (
-    <div className="modal-scrim" onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="modal-scrim" data-closing={closing || undefined} onClick={e => e.target === e.currentTarget && close()}>
       <div className="modal">
         <div className="modal-head">
           <h3>{cfg.title}</h3>
-          <button type="button" onClick={onClose} className="icon-btn ghost sm">
+          <button type="button" onClick={close} className="icon-btn ghost sm">
             <X size={16} />
           </button>
         </div>

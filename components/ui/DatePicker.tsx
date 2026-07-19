@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useAnimatedClose } from '@/lib/useAnimatedClose'
 
 const DAYS = ['Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá', 'Do']
 const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
@@ -46,6 +47,7 @@ export default function DatePicker(props: DatePickerProps) {
   const isRange = props.range === true
 
   const [open, setOpen] = useState(false)
+  const { closing, close } = useAnimatedClose(() => setOpen(false), 130)
   const anchorIso = (isRange ? props.from : props.value) || todayCL(0)
   const [viewYear, setViewYear] = useState(() => new Date(anchorIso + 'T12:00:00').getFullYear())
   const [viewMonth, setViewMonth] = useState(() => new Date(anchorIso + 'T12:00:00').getMonth())
@@ -53,11 +55,11 @@ export default function DatePicker(props: DatePickerProps) {
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (ref.current && !ref.current.contains(e.target as Node)) close()
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
+  }, [close])
 
   function prevMonth() {
     if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1) }
@@ -87,7 +89,7 @@ export default function DatePicker(props: DatePickerProps) {
     const iso = isoFor(day)
     if (!isRange) {
       props.onChange(iso)
-      setOpen(false)
+      close()
       return
     }
     // Range logic: first pick = from (reset to); second pick completes range
@@ -95,7 +97,7 @@ export default function DatePicker(props: DatePickerProps) {
     if (!from || (from && to)) {
       onRangeChange(iso, '')
     } else {
-      if (iso >= from) { onRangeChange(from, iso); setOpen(false) }
+      if (iso >= from) { onRangeChange(from, iso); close() }
       else onRangeChange(iso, '')
     }
   }
@@ -178,7 +180,8 @@ export default function DatePicker(props: DatePickerProps) {
           padding: 16,
           boxShadow: 'var(--shadow)',
           width: 260,
-          animation: 'fadeIn .15s ease',
+          transformOrigin: dropUp ? 'bottom right' : 'top right',
+          animation: closing ? 'dpPopOut .13s ease forwards' : 'fadeIn .15s ease',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <button type="button" onClick={prevMonth} style={{ background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 4, borderRadius: 8, display: 'flex' }}>
@@ -260,7 +263,7 @@ export default function DatePicker(props: DatePickerProps) {
               setViewMonth(now.getMonth())
               if (isRange) props.onRangeChange(today, today)
               else props.onChange(today)
-              setOpen(false)
+              close()
             }}
             style={{
               marginTop: 10,

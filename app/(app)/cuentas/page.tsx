@@ -124,7 +124,7 @@ export default function CuentasPage() {
                           </div>
                           {limit > 0 && (
                             <div className="progress-track" style={{ marginTop: 8 }}>
-                              <div className="progress-fill" style={{ width: `${Math.min(100, (debt / limit) * 100)}%`, background: debt / limit > 0.9 ? 'var(--danger)' : debt / limit > 0.7 ? 'var(--warn)' : color }} />
+                              <div className="progress-fill" style={{ transform: `scaleX(${Math.min(1, debt / limit)})`, background: debt / limit > 0.9 ? 'var(--danger)' : debt / limit > 0.7 ? 'var(--warn)' : color }} />
                             </div>
                           )}
                         </>

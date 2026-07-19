@@ -423,7 +423,7 @@ export default function CompromisosPage() {
               {detectedCount > 0 && <span className="hero-chip chip-warn">{detectedCount} detectado{detectedCount > 1 ? 's' : ''}</span>}
               {pendingCount > 0 && <span className={`hero-chip${pendingCount > 3 ? ' chip-danger' : ' chip-warn'}`}>{pendingCount} pendiente{pendingCount > 1 ? 's' : ''}</span>}
             </div>
-            <div className="progress-track cs-bar"><div className="progress-fill" style={{ width: `${Math.round(completion * 100)}%`, background: 'var(--ok)' }} /></div>
+            <div className="progress-track cs-bar"><div className="progress-fill" style={{ transform: `scaleX(${completion})`, background: 'var(--ok)' }} /></div>
             <div className="cs-sub">
               Pagado <b>{clp(paidTotal)}</b> · Esperado <b>{clp(expectedTotal)}</b>{falta > 0 && <> · Falta <b>{clp(falta)}</b></>}
             </div>

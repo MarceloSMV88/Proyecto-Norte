@@ -4,6 +4,7 @@ import { X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
 import { useEscapeClose } from '@/lib/useEscapeClose'
+import { useAnimatedClose } from '@/lib/useAnimatedClose'
 import type { AccentColor, ProfileRole } from '@/lib/types'
 
 const COLORS: AccentColor[] = ['emerald', 'blue', 'violet', 'amber', 'red']
@@ -22,7 +23,8 @@ export default function ProfileModal({ createdBy, onClose, onSaved }: {
   const [saving, setSaving] = useState(false)
   const { showToast } = useToast()
   const supabase = createClient()
-  useEscapeClose(onClose)
+  const { closing, close } = useAnimatedClose(onClose)
+  useEscapeClose(close)
 
   const name = fullName.trim().split(/\s+/)[0] || ''
   const initials = fullName.trim().split(/\s+/).map(p => p[0]).join('').toUpperCase().slice(0, 2)
@@ -46,17 +48,17 @@ export default function ProfileModal({ createdBy, onClose, onSaved }: {
     setSaving(false)
     if (error) { showToast('Error al crear perfil'); return }
     showToast('✓ Perfil agregado')
-    onSaved(); onClose()
+    onSaved(); close()
   }
 
   return (
-    <div className="modal-scrim" onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="modal-scrim" data-closing={closing || undefined} onClick={e => e.target === e.currentTarget && close()}>
       <div className="modal" style={{ borderTop: '3px solid var(--accent)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <h2 style={{ fontFamily: 'var(--font-ui)', fontSize: 17, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
             Agregar integrante
           </h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 4 }}>
+          <button onClick={close} style={{ background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 4 }}>
             <X size={18} />
           </button>
         </div>
@@ -101,7 +103,7 @@ export default function ProfileModal({ createdBy, onClose, onSaved }: {
                   background: role === r ? 'rgba(52,201,138,.1)' : 'var(--surface-2)',
                   color: role === r ? 'var(--accent)' : 'var(--text-2)',
                   fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, cursor: 'pointer',
-                  transition: 'all .15s',
+                  transition: 'border-color .15s, background .15s, color .15s',
                 }}
               >
                 {r}
