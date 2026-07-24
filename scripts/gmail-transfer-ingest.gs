@@ -23,24 +23,39 @@ const SEARCH   = '((from:santander.cl OR from:bancochile.cl OR from:bancoripley.
                + 'OR (from:bancoestado.cl subject:(Comprobante OR Transferencias)) '
                + 'OR (from:indexa.cl subject:("Aviso de Pagos"))';
 
+// Gate por MARCA DE TIEMPO (no por etiqueta de hilo). Santander agrupa TODAS las
+// transferencias en un mismo hilo (mismo asunto "Comprobante Transferencia de fondos"); si
+// gateáramos excluyendo hilos etiquetados, cada transferencia nueva que cae en un hilo ya
+// procesado se perdería en silencio. En cambio guardamos el timestamp del último correo
+// procesado (high-water mark) y solo procesamos correos MÁS NUEVOS que ese instante.
+const HWM_KEY = 'norte_hwm';
+
 /**
- * EJECUTAR UNA SOLA VEZ antes de activar el trigger.
- * Marca todos los correos de transferencia EXISTENTES como procesados (sin enviarlos),
- * para que no se re-importen y dupliquen los saldos ya cargados manualmente.
+ * EJECUTAR UNA SOLA VEZ antes de activar el trigger (o tras pegar una versión nueva).
+ * Fija la línea base en AHORA: solo se procesarán correos posteriores a este instante,
+ * para no re-importar el pasado ni duplicar saldos ya cargados.
  */
 function marcarBaseline() {
+  PropertiesService.getScriptProperties().setProperty(HWM_KEY, String(Date.now()));
+  // Etiqueta los hilos existentes solo para verlos identificados (ya NO controla el gating).
   const label = GmailApp.getUserLabelByName(LABEL) || GmailApp.createLabel(LABEL);
-  const threads = GmailApp.search(SEARCH + ' -label:' + LABEL + ' newer_than:180d', 0, 200);
+  const threads = GmailApp.search(SEARCH + ' newer_than:180d', 0, 200);
   threads.forEach(t => t.addLabel(label));
-  Logger.log('Baseline: ' + threads.length + ' hilos marcados como procesados.');
+  Logger.log('Baseline HWM=' + Date.now() + ' · ' + threads.length + ' hilos etiquetados.');
 }
 
 function procesarTransferencias() {
+  const props = PropertiesService.getScriptProperties();
+  const hwm = Number(props.getProperty(HWM_KEY) || 0);
   const label = GmailApp.getUserLabelByName(LABEL) || GmailApp.createLabel(LABEL);
-  const threads = GmailApp.search(SEARCH + ' -label:' + LABEL + ' newer_than:7d', 0, 30);
+  const threads = GmailApp.search(SEARCH + ' newer_than:7d', 0, 50);
+  let maxSeen = hwm;
 
   threads.forEach(thread => {
     thread.getMessages().forEach(msg => {
+      const ts = msg.getDate().getTime();
+      if (ts <= hwm) return;            // ya procesado en una corrida anterior
+      if (ts > maxSeen) maxSeen = ts;
       const from = msg.getFrom().toLowerCase();
       const body = msg.getPlainBody().replace(/ /g, ' ');
       let data = null;
@@ -77,8 +92,11 @@ function procesarTransferencias() {
         });
       });
     });
-    thread.addLabel(label);
+    thread.addLabel(label);   // solo visibilidad; el gating es por timestamp (HWM)
   });
+
+  props.setProperty(HWM_KEY, String(maxSeen));
+  Logger.log('HWM actualizado a ' + maxSeen);
 }
 
 // Helpers

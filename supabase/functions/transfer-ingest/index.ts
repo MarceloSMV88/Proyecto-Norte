@@ -317,11 +317,22 @@ Deno.serve(async (req) => {
   for (const c of (cands ?? [])) {
     const t = tokens(String(c.description ?? ''))
     const exAccts = [t.oa, t.da].filter(Boolean).map(acctKey)
-    const sharesAcct = newAccts.some(a => exAccts.includes(a))
-    const exPair = [t.ob, t.db].filter(Boolean).sort().join('|')
-    const samePair = newPair && exPair && newPair === exPair
     const sameTx = txnId && t.tx && txnId === t.tx
-    if (sharesAcct || samePair || sameTx) return json({ ok: true, inserted: false, reason: 'duplicate', matched: c.id })
+    let dup = !!sameTx
+    if (!dup && txType === 'transfer') {
+      // Interna: los 2 correos del MISMO movimiento comparten alguna cuenta o el par de bancos.
+      const sharesAcct = newAccts.some(a => exAccts.includes(a))
+      const exPair = [t.ob, t.db].filter(Boolean).sort().join('|')
+      const samePair = !!(newPair && exPair && newPair === exPair)
+      dup = sharesAcct || samePair
+    } else if (!dup) {
+      // Gasto/ingreso a/de un TERCERO: solo es duplicado si coincide la cuenta de la CONTRAPARTE.
+      // NO basta con compartir el origen (tu misma cuenta paga muchos gastos distintos el mismo
+      // día por el mismo monto — eran falsos duplicados que se perdían en silencio).
+      const cpKey = acctKey(txType === 'gasto' ? destAcctD : originAcctD)
+      dup = !!cpKey && exAccts.includes(cpKey)
+    }
+    if (dup) return json({ ok: true, inserted: false, reason: 'duplicate', matched: c.id })
   }
 
   // Dedup cross-fuente: la misma transferencia ya pudo llegar por notificación push
