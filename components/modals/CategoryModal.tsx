@@ -6,7 +6,7 @@ import { useToast } from '@/components/ui/Toast'
 import { useEscapeClose } from '@/lib/useEscapeClose'
 import { useAnimatedClose } from '@/lib/useAnimatedClose'
 import { ICON_CATALOG, catEmoji } from '@/lib/icons'
-import type { Category, CategoryGroup, AccentColor } from '@/lib/types'
+import type { Category, CategoryBudget, CategoryGroup, AccentColor } from '@/lib/types'
 
 const GROUPS: CategoryGroup[] = ['Fijos', 'Variables', 'Ahorro']
 
@@ -20,21 +20,23 @@ const COLORS: { key: AccentColor; hex: string }[] = [
 
 interface CategoryModalProps {
   profileId: string
-  month: string            // '2026-06-01'
-  category?: Category      // si viene → modo edición
+  month: string            // '2026-06-01' — mes activo en Presupuesto
+  category?: Category      // si viene → modo edición de identidad
+  budget?: CategoryBudget  // fila de category_budgets de ESTE mes (si existe) — para editar `assigned`
   defaultGroup?: CategoryGroup
   onClose: () => void
   onSaved: () => void
 }
 
-export default function CategoryModal({ profileId, month, category, defaultGroup, onClose, onSaved }: CategoryModalProps) {
+export default function CategoryModal({ profileId, month, category, budget, defaultGroup, onClose, onSaved }: CategoryModalProps) {
   const isEdit = !!category
   const [name, setName] = useState(category?.name ?? '')
   const [group, setGroup] = useState<CategoryGroup>(category?.group_name ?? defaultGroup ?? 'Variables')
   const [icon, setIcon] = useState(category?.icon ?? 'tag')
   const validColor = (c?: string): AccentColor => (COLORS.some(x => x.key === c) ? c as AccentColor : 'emerald')
   const color = validColor(category?.color)
-  const [assigned, setAssigned] = useState(category ? String(category.assigned) : '')
+  const [active, setActive] = useState(category?.active ?? true)
+  const [assigned, setAssigned] = useState(budget ? String(budget.assigned) : '')
   const [saving, setSaving] = useState(false)
   const { showToast } = useToast()
   const supabase = createClient()
@@ -51,32 +53,55 @@ export default function CategoryModal({ profileId, month, category, defaultGroup
     if (!name.trim()) return
     setSaving(true)
 
-    const payload = {
+    const identityPayload = {
       name: name.trim(),
       group_name: group,
       icon,
       color,
-      assigned: assignedN,
       fixed,
+      ...(isEdit ? { active } : {}),
     }
 
-    const { error } = isEdit
-      ? await supabase.from('categories').update(payload).eq('id', category!.id)
-      : await supabase.from('categories').insert({ ...payload, profile_id: profileId, month, spent: 0 })
+    if (isEdit) {
+      const { error: catErr } = await supabase.from('categories').update(identityPayload).eq('id', category!.id)
+      if (catErr) { setSaving(false); showToast('Error al guardar'); return }
 
+      const { error: budgetErr } = budget
+        ? await supabase.from('category_budgets').update({ assigned: assignedN }).eq('id', budget.id)
+        : await supabase.from('category_budgets').insert({ category_id: category!.id, month, assigned: assignedN, spent: 0 })
+      setSaving(false)
+      if (budgetErr) { showToast('Categoría guardada, pero no se pudo actualizar el monto asignado'); return }
+      showToast('✓ Categoría actualizada')
+      onSaved(); close()
+      return
+    }
+
+    const { data: newCat, error: catErr } = await supabase.from('categories')
+      .insert({ ...identityPayload, profile_id: profileId, active: true })
+      .select('id').single()
+    if (catErr || !newCat) { setSaving(false); showToast('Error al guardar'); return }
+    const { error: budgetErr } = await supabase.from('category_budgets')
+      .insert({ category_id: newCat.id, month, assigned: assignedN, spent: 0 })
     setSaving(false)
-    if (error) { showToast('Error al guardar'); return }
-    showToast(isEdit ? '✓ Categoría actualizada' : '✓ Categoría creada')
+    if (budgetErr) { showToast('Categoría creada, pero no se pudo asignar el monto de este mes'); return }
+    showToast('✓ Categoría creada')
     onSaved(); close()
   }
 
   async function handleDelete() {
     if (!category) return
-    if (!confirm(`¿Eliminar la categoría "${category.name}"? Los movimientos asociados quedarán sin categoría.`)) return
+    if (!confirm(`¿Eliminar por completo la categoría "${category.name}", incluyendo su historial de meses? Si solo querés dejar de usarla de acá en adelante sin perder el historial, desmarca "Activa" y guarda en vez de eliminar.`)) return
     setSaving(true)
     const { error } = await supabase.from('categories').delete().eq('id', category.id)
     setSaving(false)
-    if (error) { showToast('Error al eliminar'); return }
+    if (error) {
+      if (error.code === '23503') {
+        showToast('No se puede eliminar: tiene movimientos o compromisos asociados. Desmarcá "Activa" en vez de eliminar.')
+      } else {
+        showToast('Error al eliminar')
+      }
+      return
+    }
     showToast('✓ Categoría eliminada')
     onSaved(); close()
   }
@@ -138,8 +163,8 @@ export default function CategoryModal({ profileId, month, category, defaultGroup
               : 'Gasto fijo — se reserva y no afecta el disponible diario.'}
           </div>
 
-          {/* Monto asignado */}
-          <label className="field-label" style={{ marginTop: 16 }}>Monto asignado ($)</label>
+          {/* Monto asignado (de ESTE mes) */}
+          <label className="field-label" style={{ marginTop: 16 }}>Monto asignado este mes ($)</label>
           <div className="amount-field" style={{ marginBottom: 0 }}>
             <span className="amount-cur">$</span>
             <input
@@ -180,6 +205,14 @@ export default function CategoryModal({ profileId, month, category, defaultGroup
             ))}
           </div>
 
+          {/* Activa (solo al editar) */}
+          {isEdit && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16, fontSize: 13, fontFamily: 'var(--font-ui)', color: 'var(--text-2)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} />
+              Activa — si la desmarcás, deja de aparecer en meses futuros (el historial de meses pasados no se toca)
+            </label>
+          )}
+
           {/* Acciones */}
           <div style={{ display: 'flex', gap: 10, marginTop: 20, alignItems: 'center' }}>
             {isEdit && (
@@ -187,7 +220,7 @@ export default function CategoryModal({ profileId, month, category, defaultGroup
                 type="button"
                 onClick={handleDelete}
                 disabled={saving}
-                title="Eliminar categoría"
+                title="Eliminar categoría por completo"
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   width: 44, padding: '12px 0', borderRadius: 'var(--radius-sm)',
