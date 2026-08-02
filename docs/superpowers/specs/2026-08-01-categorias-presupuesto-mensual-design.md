@@ -94,7 +94,7 @@ Al categorizar una transacción, además de sumar `spent`, hace upsert de la fil
 
 ### Edge Functions (`supabase/functions/`)
 
-`transfer-ingest/index.ts` tiene 3 lugares que buscan la categoría con `.eq('name', ...).eq('month', month)` (pago de TC, cuotas Coopeuch, y el flujo genérico de "Ahorro - Personal"). Como `categories` deja de tener columna `month`, estas 3 consultas se rompen si no se ajustan — se elimina el `.eq('month', month)` de esas 3 líneas (la búsqueda por nombre+perfil sigue siendo única sin el filtro de mes). `wallet-ingest` y `notif-ingest` ya buscan solo por nombre — no requieren cambios.
+**Corrección (encontrada por el reviewer de la Task 1 de implementación, no en el análisis original):** `transfer-ingest/index.ts` tiene 3 lugares que buscan la categoría con `.eq('name', ...).eq('month', month)` (pago de TC, cuotas Coopeuch, y el flujo genérico de "Ahorro - Personal"). El análisis original decía que `wallet-ingest` y `notif-ingest` "ya buscan solo por nombre, no requieren cambios" — eso fue un falso negativo: el grep de verificación se cortó a 3 líneas de contexto y no llegó a ver la 4ª línea de la consulta. Las 3 Edge Functions tienen el mismo `.eq('month', month)` (`wallet-ingest/index.ts:120`, `notif-ingest/index.ts:408`, además de las 3 de `transfer-ingest`) — 5 call sites en total, los 5 se rompen igual al desaparecer la columna `month` de `categories`. Se elimina `.eq('month', month)` de los 5 (la búsqueda por nombre+perfil sigue siendo única sin el filtro de mes).
 
 ### Tipos (`lib/types.ts`)
 

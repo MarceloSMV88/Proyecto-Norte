@@ -340,15 +340,60 @@ COMMIT;
 
 Expected: el resultado de la llamada muestra el `NOTICE` "Verificación OK..." y la transacción queda comiteada. Si en cambio muestra un error `Verificación falló: ...`, la transacción se abortó sola — producción queda intacta, sin costo — y hay que revisar el contenido de los puntos 1-12 (pegados donde dice el comentario) antes de reintentar.
 
-- [ ] **Step 3: Redeployar `transfer-ingest` inmediatamente después (ver Task 8)**
+- [ ] **Step 3: Arreglar y redeployar transfer-ingest, wallet-ingest Y notif-ingest — no alcanza con redeployar sin cambios**
 
-No dejar producción con el schema nuevo y la Edge Function vieja al mismo tiempo — la Task 8 (que solo cambia 3 líneas) se ejecuta a continuación de este mismo Step, antes de soltar el checkpoint de esta tarea.
+**Corrección importante (encontrada por el reviewer de esta task, no estaba así en la versión original de este Step):** redeployar `transfer-ingest` con su contenido SIN CAMBIOS no evita la ventana de rotura — el problema no es "versión vieja vs. nueva del código", es que el código en sí consulta `categories.month`, columna que ya no existe después de este mismo Step 2. Redeployar sin tocarlo dejaba (y dejó, en el primer intento de este Step) las 3 categorías de gasto automático de `transfer-ingest` fallando en silencio (el error de PostgREST por columna inexistente no se chequea — `const { data: cat } = await sb.from('categories')...` sin mirar `error` — así que `categoryId` simplemente queda `null` y el movimiento se inserta sin categoría ni vínculo a compromiso, sin ningún error visible en logs ni en `ingest_failures`).
 
-- [ ] **Step 4: Commit**
+Además: al mapear los call sites de `categories` con `.eq('month', ...)` para el spec original, se cortó el grep en 3 líneas de contexto y se pasaron por alto 2 ocurrencias idénticas en **`wallet-ingest`** (línea 120) y **`notif-ingest`** (línea 408) — ninguna task del plan las tenía asignadas. Como esto ya está en producción con el schema nuevo, hay que arreglar las 3 Edge Functions ACÁ, ahora, no esperar a la Task 8 (que quedará como una task de verificación liviana, ver su texto actualizado).
+
+Editar los 5 call sites, quitando `.eq('month', month)` (la búsqueda por nombre+perfil sigue siendo única sin el filtro de mes):
+
+`supabase/functions/transfer-ingest/index.ts` — 3 ocurrencias (alrededor de las líneas 128, 160, 266-267, 398-399 y 411 según el archivo antes de este fix; buscar todas las que combinen `.eq('name', ...)` seguido de `.eq('month', month)` sobre `from('categories')` y quitar solo la cláusula `.eq('month', month)` de cada una):
+
+```ts
+// antes (patrón repetido, con variaciones en el .eq('name', ...) de cada rama):
+      .eq('profile_id', profileId).eq('name', 'Tarjetas de crédito').eq('month', month).limit(1).maybeSingle()
+// después:
+      .eq('profile_id', profileId).eq('name', 'Tarjetas de crédito').limit(1).maybeSingle()
+```
+(aplicar el mismo quite de `.eq('month', month)` a las 3 ocurrencias del archivo — 'Tarjetas de crédito', 'Ahorro - Personal' (aparece 2 veces), y `match.category_name` por reglas.)
+
+`supabase/functions/wallet-ingest/index.ts:116-122`:
+
+```ts
+// antes:
+      const { data: cat } = await sb.from('categories')
+        .select('id')
+        .eq('profile_id', profileId)
+        .eq('name', match.category_name)
+        .eq('month', month)
+        .limit(1)
+        .maybeSingle()
+// después:
+      const { data: cat } = await sb.from('categories')
+        .select('id')
+        .eq('profile_id', profileId)
+        .eq('name', match.category_name)
+        .limit(1)
+        .maybeSingle()
+```
+
+`supabase/functions/notif-ingest/index.ts:404-410` — mismo cambio, mismo patrón exacto.
+
+Redeployar las 3 funciones (`transfer-ingest`, `wallet-ingest`, `notif-ingest`) vía `mcp__claude_ai_Supabase__deploy_edge_function` con `verify_jwt: false` en las 3 (confirmar el valor actual de cada una con `list_edge_functions` antes de desplegar, igual que se hizo para `transfer-ingest` en la sesión anterior).
+
+- [ ] **Step 4: Commit de la migración**
 
 ```bash
 git add supabase/migrations/012_category_budgets_split.sql
 git commit -m "feat(db): separar categories (estable) de category_budgets (mensual)"
+```
+
+- [ ] **Step 5: Commit de las 3 Edge Functions**
+
+```bash
+git add supabase/functions/transfer-ingest/index.ts supabase/functions/wallet-ingest/index.ts supabase/functions/notif-ingest/index.ts
+git commit -m "fix(edge-functions): categories ya no tiene columna month"
 ```
 
 ---
@@ -1319,97 +1364,33 @@ git commit -m "fix(resumen,habitos): consultar category_budgets del mes en vez d
 
 ---
 
-## Task 8: Edge Function `transfer-ingest` — quitar el filtro por mes
+## Task 8: Edge Functions — verificar el fix que ya se aplicó en la Task 1
+
+**Contexto (cambio respecto a la versión original de esta task):** el reviewer de la Task 1 encontró que "redeployar `transfer-ingest` sin cambios" (como decía originalmente el Step 3 de la Task 1) NO evitaba la ventana de rotura — el código seguía consultando `categories.month`, columna que ya no existe, fallando en silencio (sin chequeo de `error`) y dejando toda transacción nueva sin categorizar. Además se encontraron 2 ocurrencias idénticas no contempladas en `wallet-ingest` y `notif-ingest`. Los 5 call sites de las 3 Edge Functions ya se corrigieron y redesplegaron como parte de la Task 1 (Step 3), con su propio commit (Step 5) — no como parte de esta Task 8.
+
+Esta Task 8 queda como una verificación de que ese fix quedó bien, no como el fix en sí.
 
 **Files:**
-- Modify: `supabase/functions/transfer-ingest/index.ts:128, 160, 266-267, 398-399, 411`
+- Ninguno (solo verificación).
 
 **Interfaces:**
-- Consumes: schema nuevo de `categories` (Task 1, ya debe estar aplicado en producción antes de este paso — ver Global Constraints y Task 1 Step 3).
+- Consumes: el fix ya aplicado en Task 1 Step 3 sobre `supabase/functions/transfer-ingest/index.ts`, `supabase/functions/wallet-ingest/index.ts`, `supabase/functions/notif-ingest/index.ts`.
 
-- [ ] **Step 1: Quitar `.eq('month', month)` de las 3 búsquedas de categoría**
-
-Ubicación 1 (rama `pago_tc`, alrededor de la línea 128):
-
-Reemplazar:
-```ts
-      const { data: catRow } = await sb.from('categories').select('id')
-        .eq('profile_id', profileId).eq('name', 'Tarjetas de crédito').eq('month', month).limit(1).maybeSingle()
-```
-por:
-```ts
-      const { data: catRow } = await sb.from('categories').select('id')
-        .eq('profile_id', profileId).eq('name', 'Tarjetas de crédito').limit(1).maybeSingle()
-```
-
-Ubicación 2 (rama `coopeuch_cuotas`, alrededor de la línea 160):
-
-Reemplazar:
-```ts
-    const { data: cat } = await sb.from('categories').select('id')
-      .eq('profile_id', profileId).eq('name', 'Ahorro - Personal').eq('month', month).limit(1).maybeSingle()
-```
-por:
-```ts
-    const { data: cat } = await sb.from('categories').select('id')
-      .eq('profile_id', profileId).eq('name', 'Ahorro - Personal').limit(1).maybeSingle()
-```
-
-Ubicación 3 (rama `pago_servicio`, categoría por reglas, alrededor de la línea 266-267):
-
-Reemplazar:
-```ts
-        const { data: cat } = await sb.from('categories').select('id')
-          .eq('profile_id', profileId).eq('name', match.category_name).eq('month', month).limit(1).maybeSingle()
-```
-por:
-```ts
-        const { data: cat } = await sb.from('categories').select('id')
-          .eq('profile_id', profileId).eq('name', match.category_name).limit(1).maybeSingle()
-```
-
-Ubicación 4 (rama genérica, categoría por reglas de gasto, alrededor de la línea 398-399 — mismo patrón que Ubicación 3, ocurre dos veces en el archivo):
-
-Reemplazar:
-```ts
-        const { data: cat } = await sb.from('categories').select('id')
-          .eq('profile_id', profileId).eq('name', match.category_name).eq('month', month).limit(1).maybeSingle()
-```
-por:
-```ts
-        const { data: cat } = await sb.from('categories').select('id')
-          .eq('profile_id', profileId).eq('name', match.category_name).limit(1).maybeSingle()
-```
-
-Ubicación 5 (rama genérica, "Ahorro Premium", alrededor de la línea 411):
-
-Reemplazar:
-```ts
-    const { data: cat } = await sb.from('categories').select('id')
-      .eq('profile_id', profileId).eq('name', 'Ahorro - Personal').eq('month', month).limit(1).maybeSingle()
-```
-por:
-```ts
-    const { data: cat } = await sb.from('categories').select('id')
-      .eq('profile_id', profileId).eq('name', 'Ahorro - Personal').limit(1).maybeSingle()
-```
-
-- [ ] **Step 2: Desplegar la función actualizada**
-
-Vía `mcp__claude_ai_Supabase__deploy_edge_function` sobre el proyecto `gfswrtyxgsxakkpgduda`, function `transfer-ingest`, con `verify_jwt: false` (mismo valor que la versión actual — confirmar con `mcp__claude_ai_Supabase__list_edge_functions` antes de desplegar).
-
-Este paso se ejecuta como parte del Task 1 Step 3 (inmediatamente después de aplicar la migración a producción) — si esta Task se hace por separado, no soltar el checkpoint de Task 1 hasta que esta Task esté desplegada.
-
-- [ ] **Step 3: Verificación manual**
-
-Provocar (o esperar) un correo de pago de TC / cuotas Coopeuch / pago de servicio con regla de categoría, y confirmar en `ingest_failures` (Supabase) que no aparece ningún error nuevo `bad_amount`/`insert_failed` asociado a estos cambios. Alternativa más rápida: correr manualmente el payload de prueba contra el endpoint (igual que se hizo para `giro_cajero` en la sesión anterior) y confirmar `category_matched: true` en la respuesta.
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 1: Confirmar que no queda ningún `.eq('month'` sobre `categories` en ninguna Edge Function**
 
 ```bash
-git add supabase/functions/transfer-ingest/index.ts
-git commit -m "fix(transfer-ingest): categories ya no tiene columna month"
+grep -rn "from('categories')" supabase/functions/ -A 6 | grep -B 6 "eq('month'"
 ```
+
+Expected: sin resultados (si aparece algo, es un call site que Task 1 Step 3 no cubrió — arreglarlo ahora con el mismo patrón: quitar solo la cláusula `.eq('month', month)`, y redesplegar esa función).
+
+- [ ] **Step 2: Verificación manual**
+
+Provocar (o esperar) un correo de pago de TC / cuotas Coopeuch / pago de servicio con regla de categoría, una compra por Google Wallet, y una notificación push de banco — y confirmar en `ingest_failures` (Supabase) que no aparece ningún error nuevo asociado a estos cambios. Alternativa más rápida: correr manualmente un payload de prueba contra cada endpoint y confirmar `category_matched: true` (o `categoryId` no nulo) en la respuesta.
+
+- [ ] **Step 3: Commit (solo si el Step 1 encontró algo que arreglar)**
+
+Si no hubo nada que corregir, no hay commit que hacer en esta task — el commit real ya quedó en Task 1 Step 5.
 
 ---
 
