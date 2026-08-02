@@ -1,3 +1,5 @@
+import type { CategoryBudgetJoinRow, CategoryWithBudget } from './types'
+
 export function clp(n: number, withSign = false): string {
   const v = Math.round(Math.abs(n))
   const s = '$' + v.toLocaleString('es-CL')
@@ -64,4 +66,10 @@ export function getCurrentMonth(): string {
 
 export function cn(...classes: (string | undefined | false | null)[]): string {
   return classes.filter(Boolean).join(' ')
+}
+
+export function flattenCategoryBudgets(budgets: CategoryBudgetJoinRow[]): CategoryWithBudget[] {
+  return budgets
+    .filter((b): b is CategoryBudgetJoinRow & { categories: NonNullable<CategoryBudgetJoinRow['categories']> } => b.categories !== null)
+    .map(b => ({ ...b.categories, assigned: b.assigned, spent: b.spent, budget_id: b.id }))
 }

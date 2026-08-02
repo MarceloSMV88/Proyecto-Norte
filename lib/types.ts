@@ -28,12 +28,26 @@ export interface Category {
   icon: string
   color: AccentColor
   group_name: CategoryGroup
-  assigned: number
-  spent: number
   fixed: boolean
-  month: string
+  active: boolean
   created_at: string
 }
+
+export interface CategoryBudget {
+  id: string
+  category_id: string
+  month: string
+  assigned: number
+  spent: number
+}
+
+// Forma aplanada que usan Presupuesto/Resumen/Hábitos tras el join category_budgets+categories,
+// para no tener que tocar el resto de cada pantalla (que ya usa cat.assigned/cat.spent/cat.name).
+export type CategoryWithBudget = Category & { assigned: number; spent: number; budget_id: string }
+
+// Forma cruda que devuelve supabase-js al pedir category_budgets con categories!inner(...)
+// anidada — es lo que recibe flattenCategoryBudgets() antes de aplanar.
+export type CategoryBudgetJoinRow = { id: string; assigned: number; spent: number; categories: Category | null }
 
 export interface Account {
   id: string
