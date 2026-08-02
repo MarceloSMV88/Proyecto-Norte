@@ -5,9 +5,9 @@ import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
 import CategoryModal from '@/components/modals/CategoryModal'
-import { clp, computeSummary, formatDate, getCurrentMonth } from '@/lib/utils'
+import { clp, computeSummary, flattenCategoryBudgets, formatDate, getCurrentMonth } from '@/lib/utils'
 import { catEmoji } from '@/lib/icons'
-import type { Category, Account, CategoryGroup, Transaction } from '@/lib/types'
+import type { CategoryWithBudget, CategoryBudgetJoinRow, Account, CategoryGroup, Transaction } from '@/lib/types'
 
 const GROUPS: CategoryGroup[] = ['Fijos', 'Variables', 'Ahorro']
 
@@ -21,20 +21,22 @@ export default function PresupuestoPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
-  const [categories, setCategories] = useState<Category[]>([])
+  const [categories, setCategories] = useState<CategoryWithBudget[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [editing, setEditing] = useState<string | null>(null)
   const [editVal, setEditVal] = useState('')
-  const [modalCat, setModalCat] = useState<Category | null>(null)
+  const [modalCat, setModalCat] = useState<CategoryWithBudget | null>(null)
   const [addGroup, setAddGroup] = useState<CategoryGroup | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const load = useCallback(async () => {
     if (!activeProfile) return
+    await supabase.rpc('ensure_month_budgets', { p_profile_id: activeProfile.id, p_month: selectedMonth })
     const nextMonth = nextMonthStr(selectedMonth)
-    const [cats, accs, txs] = await Promise.all([
-      supabase.from('categories').select('*').eq('profile_id', activeProfile.id).eq('month', selectedMonth).order('created_at'),
+    const [budgets, accs, txs] = await Promise.all([
+      supabase.from('category_budgets').select('id, assigned, spent, categories!inner(id, profile_id, name, icon, color, group_name, fixed, active, created_at)')
+        .eq('categories.profile_id', activeProfile.id).eq('month', selectedMonth),
       supabase.from('accounts').select('*').eq('profile_id', activeProfile.id),
       // Igual criterio que sync_category_spent: gastos + la pata positiva (destino) de
       // transferencias categorizadas (ej. aportes a ahorro entre 2 cuentas propias).
@@ -44,7 +46,7 @@ export default function PresupuestoPage() {
         .gte('date', selectedMonth).lt('date', nextMonth)
         .order('date', { ascending: false }),
     ])
-    setCategories((cats.data || []) as Category[])
+    setCategories(flattenCategoryBudgets((budgets.data || []) as unknown as CategoryBudgetJoinRow[]).sort((a, b) => a.name.localeCompare(b.name)))
     setAccounts((accs.data || []) as Account[])
     setTransactions((txs.data || []) as Transaction[])
   }, [activeProfile, supabase, selectedMonth])
@@ -71,12 +73,12 @@ export default function PresupuestoPage() {
     setEditing(null)
     const n = parseInt(val.replace(/\D/g, ''))
     if (isNaN(n)) return
-    await supabase.from('categories').update({ assigned: n }).eq('id', id)
+    await supabase.from('category_budgets').update({ assigned: n }).eq('category_id', id).eq('month', selectedMonth)
     load()
   }
 
   // Abre la edición de una categoría; si había otra en edición, la guarda primero
-  function startEdit(cat: Category) {
+  function startEdit(cat: CategoryWithBudget) {
     if (editing && editing !== cat.id) {
       void commitAssigned(editing, editVal)
     }
@@ -307,6 +309,7 @@ export default function PresupuestoPage() {
           profileId={activeProfile.id}
           month={selectedMonth}
           category={modalCat}
+          budget={{ id: modalCat.budget_id, category_id: modalCat.id, month: selectedMonth, assigned: modalCat.assigned, spent: modalCat.spent }}
           onClose={() => setModalCat(null)}
           onSaved={load}
         />
@@ -324,7 +327,7 @@ const SECTION_COLOR: Record<string, string> = {
 }
 
 // Donut de asignación por sección (Fijos / Variables / Ahorro)
-function SectionDonut({ categories }: { categories: Category[] }) {
+function SectionDonut({ categories }: { categories: CategoryWithBudget[] }) {
   const sections = (['Fijos', 'Variables', 'Ahorro'] as const).map(g => ({
     name: g,
     value: categories.filter(c => c.group_name === g).reduce((s, c) => s + c.assigned, 0),
@@ -373,7 +376,7 @@ function SectionDonut({ categories }: { categories: Category[] }) {
 }
 
 // Barras horizontales: categorías que más gastan (top 5)
-function TopSpendBars({ categories }: { categories: Category[] }) {
+function TopSpendBars({ categories }: { categories: CategoryWithBudget[] }) {
   const top = [...categories].filter(c => c.spent > 0).sort((a, b) => b.spent - a.spent).slice(0, 5)
   const max = top[0]?.spent || 1
 
