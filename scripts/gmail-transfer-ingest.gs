@@ -17,7 +17,7 @@ const LABEL    = 'norte-procesado';
 // propósito — Servipag ya manda su propio comprobante con el detalle real (empresa/monto);
 // procesar ambos duplicaría el gasto.
 const SEARCH   = '((from:santander.cl OR from:bancochile.cl OR from:bancoripley.cl OR from:servipag.cl) '
-               + 'subject:(transferencia OR Comprobante OR Transferencias OR Deuda)) '
+               + 'subject:(transferencia OR Comprobante OR Transferencias OR Deuda OR Giro)) '
                + 'OR (from:metlife.cl subject:(dividendo)) '
                + 'OR (from:transaccionalcoopeuch.com subject:(Cuotas)) '
                + 'OR (from:bancoestado.cl subject:(Comprobante OR Transferencias)) '
@@ -157,6 +157,8 @@ function parseChile(txt) {
   if (/Resumen de Cuentas Pagadas/i.test(txt) || /Pago de tu\(?s\)? Cuenta/i.test(txt)) return parseChilePagoCuentas(txt);
   // Plantilla "Comprobante de Transferencia a terceros" (bloques Origen / Destino)
   if (/Transferencia a terceros/i.test(txt)) return parseChileTerceros(txt);
+  // Plantilla "Giro con Tarjeta de Débito" (retiro de efectivo en cajero automático)
+  if (/giro\s+en\s+Cajero/i.test(txt)) return parseChileGiroCajero(txt);
   const idxDest = txt.search(/Datos\s+de\s+la\s+Transferencia/i);
   const dBlk = txt.search(/Datos\s+del\s+Destinatario/i) > -1
     ? txt.slice(txt.search(/Datos\s+del\s+Destinatario/i), idxDest > -1 ? idxDest : undefined) : txt;
@@ -197,6 +199,19 @@ function parseChilePagoCuentas(txt) {
     });
   }
   return items;
+}
+
+// Plantilla "Giro con Tarjeta de Débito" (retiro de efectivo en cajero, sin contraparte).
+// cuerpo: "se ha realizado un giro en Cajero por $80.000 con cargo a Cuenta ****7004 el
+// 24/07/2026 12:46." — no trae "empresa"/destinatario, solo el número de cuenta enmascarado
+// (últimos dígitos) con cargo al que va el gasto.
+function parseChileGiroCajero(txt) {
+  return {
+    kind:   'giro_cajero',
+    amount: money(txt, /Cajero\s+por\s*\$\s*([\d.,]+)/i),
+    date:   fechaChile(txt) || g(/el\s+(\d{1,2}\/\d{1,2}\/\d{4})/i, txt),
+    last4:  g(/Cuenta\s*\*+(\d{3,6})/i, txt).slice(-4),
+  };
 }
 
 // Plantilla "Comprobante de Transferencia a terceros".

@@ -174,6 +174,40 @@ Deno.serve(async (req) => {
     return json({ ok: true, inserted: true, kind: 'coopeuch_cuotas', legs: (ins ?? []).length, amount: amt, origin_matched: !!origin, dest_matched: !!dest, date: dateStr })
   }
 
+  // === Giro en cajero con Tarjeta de Débito (retiro de efectivo, Banco de Chile) ===
+  // Gasto de una sola pata, sin contraparte/empresa: solo trae los últimos dígitos
+  // enmascarados de la cuenta con cargo (ej. "Cuenta ****7004"). Se matchea primero por
+  // accounts.last4 (tarjetas) y si no, por los últimos 4 dígitos de account_number (cta cte).
+  if (String(b.kind ?? '') === 'giro_cajero') {
+    const amt = parseInt(digits(b.amount), 10)
+    if (!amt || amt <= 0) { await logFailure('bad_amount', b); return json({ error: 'bad_amount', got: b.amount }, 400) }
+    const last4 = String(b.last4 ?? '').trim()
+    const dateStr = normDate(b.date)
+
+    const { data: adminProf } = await sb.from('profiles').select('id').eq('role', 'Admin').limit(1).single()
+    if (!adminProf) return json({ error: 'no_profile' }, 500)
+    const profileId = adminProf.id as string
+
+    const label = 'Giro Cajero'
+    const { data: dup } = await sb.from('transactions').select('id')
+      .eq('profile_id', profileId).eq('name', label).eq('amount', -amt).eq('date', dateStr).limit(1)
+    if (dup && dup.length > 0) return json({ ok: true, inserted: false, reason: 'duplicate' })
+
+    const { data: accts } = await sb.from('accounts').select('id, account_number, last4').eq('profile_id', profileId)
+    const acc = (accts ?? []).find(a => a.last4 && last4 && a.last4 === last4)
+      ?? (accts ?? []).find(a => a.account_number && last4 && digits(a.account_number).endsWith(last4))
+      ?? null
+
+    const { data: ins, error: insErr } = await sb.from('transactions').insert({
+      profile_id: profileId, name: label, amount: -amt, type: 'gasto',
+      category_id: null, account_id: acc?.id ?? null,
+      description: null, source: 'gmail_transfer', date: dateStr,
+    }).select('id').single()
+    if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
+
+    return json({ ok: true, inserted: true, id: ins.id, kind: 'giro_cajero', amount: amt, account_matched: !!acc, date: dateStr })
+  }
+
   // === Pago de cuentas de servicio (mail "Comprobante de pago" del Chile, N items por mail;
   // o cualquier pago con "empresa" identificable: Servipag, dividendos de créditos hipotecarios, etc.) ===
   // Cada item es un gasto: cargo a la cuenta de origen + categoría por reglas sobre
