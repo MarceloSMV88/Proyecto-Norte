@@ -48,7 +48,7 @@ export default function MovimientosPage() {
     }
     const [txs, cats, accs] = await Promise.all([
       q.order('date', { ascending: false }).order('created_at', { ascending: false }).limit(300),
-      supabase.from('categories').select('*').eq('profile_id', activeProfile.id),
+      supabase.from('categories').select('*').eq('profile_id', activeProfile.id).eq('active', true),
       supabase.from('accounts').select('*').eq('profile_id', activeProfile.id),
     ])
     setTransactions((txs.data || []) as Transaction[])
@@ -70,11 +70,10 @@ export default function MovimientosPage() {
     load()
   }
 
-  // Las categorías tienen una fila por mes: al categorizar hay que ofrecer las del MISMO
-  // mes del movimiento (no las de selectedMonth, que puede diferir si hay un rango de fechas activo).
-  function gastoCategoriesFor(dateStr: string) {
-    const month = dateStr.slice(0, 7) + '-01'
-    return categories.filter(c => c.month === month && c.group_name !== 'Ahorro')
+  // Las categorías ya no están ligadas a un mes: categorizar un movimiento no depende de
+  // que exista una fila de presupuesto para ese mes (ver ensure_month_budgets / Task 1).
+  function gastoCategoriesFor() {
+    return categories.filter(c => c.group_name !== 'Ahorro')
   }
 
   const filtered = transactions.filter(tx => {
@@ -188,7 +187,7 @@ export default function MovimientosPage() {
                                 style={{ maxWidth: 170 }}
                               >
                                 <option value="">Sin categoría</option>
-                                {gastoCategoriesFor(tx.date).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                {gastoCategoriesFor().map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                               </select>
                             ) : (
                               <button
