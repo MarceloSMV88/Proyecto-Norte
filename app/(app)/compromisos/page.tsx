@@ -118,6 +118,7 @@ export default function CompromisosPage() {
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
   const [commitments, setCommitments] = useState<MonthlyCommitment[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [budgetByCategory, setBudgetByCategory] = useState<Map<string, { assigned: number; spent: number }>>(new Map())
   const [accounts, setAccounts] = useState<Account[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [modalCommitment, setModalCommitment] = useState<MonthlyCommitment | 'new' | null>(null)
@@ -133,15 +134,17 @@ export default function CompromisosPage() {
     if (!activeProfile) return
     setTableError(null)
     const nextMonth = nextMonthStr(selectedMonth)
-    const [cmts, cats, accs, txs] = await Promise.all([
+    const [cmts, cats, budgets, accs, txs] = await Promise.all([
       supabase.from('monthly_commitments')
-        .select('*, categories(name,icon,color,group_name,assigned,spent), accounts(name), transactions(name,amount,date)')
+        .select('*, categories(name,icon,color,group_name), accounts(name), transactions(name,amount,date)')
         .eq('profile_id', activeProfile.id)
         .eq('month', selectedMonth)
         .order('group_name')
         .order('due_day', { nullsFirst: false })
         .order('name'),
-      supabase.from('categories').select('*').eq('profile_id', activeProfile.id).eq('month', selectedMonth).order('group_name').order('name'),
+      supabase.from('categories').select('*').eq('profile_id', activeProfile.id).eq('active', true).order('group_name').order('name'),
+      supabase.from('category_budgets').select('category_id, assigned, spent, categories!inner(profile_id)')
+        .eq('categories.profile_id', activeProfile.id).eq('month', selectedMonth),
       supabase.from('accounts').select('*').eq('profile_id', activeProfile.id).order('type').order('name'),
       supabase.from('transactions').select('*, categories(name,icon,color), accounts(name)')
         .eq('profile_id', activeProfile.id)
@@ -156,6 +159,7 @@ export default function CompromisosPage() {
       setCommitments((cmts.data || []) as MonthlyCommitment[])
     }
     setCategories((cats.data || []) as Category[])
+    setBudgetByCategory(new Map((budgets.data || []).map((b: { category_id: string; assigned: number; spent: number }) => [b.category_id, { assigned: b.assigned, spent: b.spent }])))
     setAccounts((accs.data || []) as Account[])
     setTransactions((txs.data || []) as Transaction[])
   }, [activeProfile, selectedMonth, supabase])
@@ -347,7 +351,7 @@ export default function CompromisosPage() {
     setCopying(true)
     const prev = prevMonthStr(selectedMonth)
     const { data, error } = await supabase.from('monthly_commitments')
-      .select('*, categories(name)')
+      .select('*')
       .eq('profile_id', activeProfile.id)
       .eq('month', prev)
       .order('group_name')
@@ -357,32 +361,27 @@ export default function CompromisosPage() {
       showToast('No pude leer el mes anterior')
       return
     }
-    const previous = (data || []) as (MonthlyCommitment & { categories?: { name: string } | null })[]
-    const categoryByName = new Map(categories.map(c => [c.name, c.id]))
-    const payload = previous
-      .map((c): CommitmentInsert | null => {
-        const categoryId = c.categories?.name ? categoryByName.get(c.categories.name) : c.category_id
-        if (!categoryId) return null
-        return {
-          profile_id: activeProfile.id,
-          category_id: categoryId,
-          account_id: c.account_id,
-          name: c.name,
-          group_name: c.group_name,
-          expected_amount: c.expected_amount,
-          due_day: c.due_day,
-          payment_method: null,
-          matcher_hint: null,
-          status: 'pendiente' as CommitmentStatus,
-          actual_amount: 0,
-          month: selectedMonth,
-        }
-      })
-      .filter((row): row is CommitmentInsert => row !== null)
+    const previous = (data || []) as MonthlyCommitment[]
+    // La categoría es la misma fila estable todos los meses (Task 1) — ya no hace falta
+    // matchear por nombre contra las categorías de este mes.
+    const payload: CommitmentInsert[] = previous.map(c => ({
+      profile_id: activeProfile.id,
+      category_id: c.category_id,
+      account_id: c.account_id,
+      name: c.name,
+      group_name: c.group_name,
+      expected_amount: c.expected_amount,
+      due_day: c.due_day,
+      payment_method: null,
+      matcher_hint: null,
+      status: 'pendiente' as CommitmentStatus,
+      actual_amount: 0,
+      month: selectedMonth,
+    }))
 
     if (!payload.length) {
       setCopying(false)
-      showToast(previous.length ? 'Faltan categorías equivalentes en este mes' : 'El mes anterior no tiene compromisos')
+      showToast('El mes anterior no tiene compromisos')
       return
     }
     const { error: insertError } = await supabase.from('monthly_commitments').insert(payload)
@@ -549,6 +548,7 @@ export default function CompromisosPage() {
           profileId={activeProfile.id}
           month={selectedMonth}
           categories={categories}
+          budgetByCategory={budgetByCategory}
           accounts={accounts}
           commitment={modalCommitment === 'new' ? undefined : modalCommitment}
           onClose={() => setModalCommitment(null)}
@@ -654,10 +654,11 @@ function SplitLinkModal({ commitment, transactions, onClose, onConfirm }: {
   )
 }
 
-function CommitmentModal({ profileId, month, categories, accounts, commitment, onClose, onSaved }: {
+function CommitmentModal({ profileId, month, categories, budgetByCategory, accounts, commitment, onClose, onSaved }: {
   profileId: string
   month: string
   categories: Category[]
+  budgetByCategory: Map<string, { assigned: number; spent: number }>
   accounts: Account[]
   commitment?: MonthlyCommitment
   onClose: () => void
@@ -749,14 +750,17 @@ function CommitmentModal({ profileId, month, categories, accounts, commitment, o
 
           <label className="field-label">Categoría obligatoria</label>
           <select value={categoryId} onChange={e => setCategoryId(e.target.value)} required>
-            {categories.length === 0 && <option value="">Crea categorías para este mes primero</option>}
+            {categories.length === 0 && <option value="">Crea una categoría primero</option>}
             {categories.map(c => <option key={c.id} value={c.id}>{catEmoji(c.icon)} {c.group_name} · {c.name}</option>)}
           </select>
-          {selectedCategory && (
-            <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 6 }}>
-              Control presupuestario: {clp(selectedCategory.spent)} gastado de {clp(selectedCategory.assigned)} asignado.
-            </div>
-          )}
+          {selectedCategory && (() => {
+            const b = budgetByCategory.get(selectedCategory.id)
+            return b ? (
+              <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 6 }}>
+                Control presupuestario: {clp(b.spent)} gastado de {clp(b.assigned)} asignado.
+              </div>
+            ) : null
+          })()}
 
           <label className="field-label">Monto esperado</label>
           <div className="amount-field" style={{ marginBottom: 0 }}>
