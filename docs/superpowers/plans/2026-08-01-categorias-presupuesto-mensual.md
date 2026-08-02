@@ -37,7 +37,7 @@
 -- es estable y category_budgets tiene la fila mensual. transactions y monthly_commitments
 -- pasan a apuntar a la categoría estable en vez de a la fila-por-mes.
 
--- 1. Renombrar la tabla vieja — no se borra hasta confirmar el backfill (ver Task 1 Step 4/6).
+-- 1. Renombrar la tabla vieja — no se borra hasta confirmar el backfill (ver Task 1 Step 2).
 alter table public.categories rename to categories_monthly_old;
 
 -- 2. Tabla nueva: identidad estable
@@ -226,70 +226,64 @@ end;
 $$;
 
 -- 13. La tabla vieja NO se borra en este script — se deja renombrada como
---     categories_monthly_old. Se borra manualmente (DROP TABLE) en un paso aparte,
---     después de confirmar en producción que todo migró bien (ver Task 1 Step 6/7).
+--     categories_monthly_old. Se borra manualmente (DROP TABLE) en la Task 9,
+--     después de confirmar que todo el plan quedó QA'eado.
 ```
 
-- [ ] **Step 2: Crear una rama de Supabase para probar la migración sin tocar producción**
+**Nota de estrategia:** no se usa una rama de Supabase (`create_branch`) para probar esto — tiene costo (~US$0.01344/hora, confirmado con `get_cost`) y el usuario está en plan free sin presupuesto para eso (ver memoria `feedback_supabase_no_paid_branching`). En su lugar, el Step 2 aplica la migración y la verifica DENTRO de la misma transacción SQL, contra producción directamente: si la verificación falla, se aborta con `raise exception` antes de llegar al `COMMIT` y producción queda exactamente como estaba, sin costo y sin riesgo.
 
-Usar la tool `mcp__claude_ai_Supabase__create_branch` sobre el proyecto `gfswrtyxgsxakkpgduda`. **Esto puede tener costo asociado — confirmar con el usuario antes de crear la rama si no está ya aprobado en la sesión.** Anotar el `project_id`/`branch_id` que devuelve, se usa en los pasos siguientes.
+- [ ] **Step 2: Aplicar la migración a producción dentro de una transacción verificada**
 
-- [ ] **Step 3: Antes de migrar, registrar los números base (rama)**
-
-Correr contra la rama, vía `mcp__claude_ai_Supabase__execute_sql`:
+Vía `mcp__claude_ai_Supabase__execute_sql` contra el proyecto `gfswrtyxgsxakkpgduda`, correr en una sola llamada:
 
 ```sql
-select count(*) as n_old_rows, sum(assigned) as sum_assigned, sum(spent) as sum_spent from public.categories;
-select count(*) as n_categorized_tx from public.transactions where category_id is not null;
-select count(*) as n_commitments from public.monthly_commitments;
+BEGIN;
+
+-- [Acá va el contenido completo de los puntos 1-12 del script del Step 1, tal cual,
+--  como sentencias sueltas — DDL es transaccional en Postgres, corre igual que el resto.]
+
+-- Verificación: compara category_budgets (nuevo) contra categories_monthly_old (snapshot
+-- intacto de antes de migrar, todavía presente en esta misma transacción) y aborta si
+-- algo no cuadra, ANTES de llegar al COMMIT.
+DO $verify$
+declare
+  v_old_rows bigint; v_new_rows bigint;
+  v_old_sum_a bigint; v_new_sum_a bigint;
+  v_old_sum_s bigint; v_new_sum_s bigint;
+  v_orphan_tx bigint; v_orphan_cm bigint;
+begin
+  select count(*), sum(assigned), sum(spent) into v_old_rows, v_old_sum_a, v_old_sum_s from public.categories_monthly_old;
+  select count(*), sum(assigned), sum(spent) into v_new_rows, v_new_sum_a, v_new_sum_s from public.category_budgets;
+  select count(*) into v_orphan_tx from public.transactions
+    where category_id is not null and category_id not in (select id from public.categories);
+  select count(*) into v_orphan_cm from public.monthly_commitments
+    where category_id not in (select id from public.categories);
+
+  if v_old_rows <> v_new_rows or v_old_sum_a is distinct from v_new_sum_a or v_old_sum_s is distinct from v_new_sum_s then
+    raise exception 'Verificación falló: filas viejas=% nuevas=% · assigned viejo=% nuevo=% · spent viejo=% nuevo=%',
+      v_old_rows, v_new_rows, v_old_sum_a, v_new_sum_a, v_old_sum_s, v_new_sum_s;
+  end if;
+  if v_orphan_tx > 0 then
+    raise exception 'Verificación falló: % transacciones categorizadas quedaron huérfanas', v_orphan_tx;
+  end if;
+  if v_orphan_cm > 0 then
+    raise exception 'Verificación falló: % compromisos quedaron huérfanos', v_orphan_cm;
+  end if;
+
+  raise notice 'Verificación OK: % filas migradas, assigned=%, spent=%, sin huérfanos', v_new_rows, v_new_sum_a, v_new_sum_s;
+end;
+$verify$;
+
+COMMIT;
 ```
 
-Guardar estos 3 números — son el baseline contra el que se comparan los resultados del Step 5.
+Expected: el resultado de la llamada muestra el `NOTICE` "Verificación OK..." y la transacción queda comiteada. Si en cambio muestra un error `Verificación falló: ...`, la transacción se abortó sola — producción queda intacta, sin costo — y hay que revisar el contenido de los puntos 1-12 (pegados donde dice el comentario) antes de reintentar.
 
-- [ ] **Step 4: Aplicar la migración a la rama**
-
-Vía `mcp__claude_ai_Supabase__apply_migration` (o `execute_sql` con el contenido completo del Step 1) contra el `project_id` de la rama.
-
-- [ ] **Step 5: Verificar la migración en la rama**
-
-Correr contra la rama:
-
-```sql
--- Debe ser igual a n_old_rows del Step 3
-select count(*) from public.category_budgets;
-
--- Deben ser IGUALES a sum_assigned / sum_spent del Step 3 (ni un peso de diferencia)
-select sum(assigned) from public.category_budgets;
-select sum(spent) from public.category_budgets;
-
--- Debe ser igual a n_categorized_tx del Step 3 (ninguna transacción categorizada quedó huérfana)
-select count(*) from public.transactions
- where category_id is not null and category_id in (select id from public.categories);
-
--- Debe ser igual a n_commitments del Step 3 (ningún compromiso quedó huérfano)
-select count(*) from public.monthly_commitments
- where category_id in (select id from public.categories);
-
--- Debe dar 0 filas: ninguna transacción o compromiso apuntando a un id que ya no existe
-select count(*) from public.transactions where category_id is not null and category_id not in (select id from public.categories);
-select count(*) from public.monthly_commitments where category_id not in (select id from public.categories);
-```
-
-Expected: los 5 números coinciden exactamente con el baseline y las últimas 2 consultas dan 0. Si alguno no coincide, **no seguir** — revisar el script del Step 1 antes de tocar producción.
-
-- [ ] **Step 6: Aplicar la migración a producción**
-
-Repetir Steps 3-5 contra el proyecto real `gfswrtyxgsxakkpgduda` (baseline → aplicar → verificar). Mismos criterios de éxito.
-
-- [ ] **Step 7: Redeployar `transfer-ingest` inmediatamente después (ver Task 8)**
+- [ ] **Step 3: Redeployar `transfer-ingest` inmediatamente después (ver Task 8)**
 
 No dejar producción con el schema nuevo y la Edge Function vieja al mismo tiempo — la Task 8 (que solo cambia 3 líneas) se ejecuta a continuación de este mismo Step, antes de soltar el checkpoint de esta tarea.
 
-- [ ] **Step 8: Borrar la rama de Supabase**
-
-`mcp__claude_ai_Supabase__delete_branch` sobre la rama creada en el Step 2 (para no dejar costo corriendo de más).
-
-- [ ] **Step 9: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add supabase/migrations/012_category_budgets_split.sql
@@ -1270,7 +1264,7 @@ git commit -m "fix(resumen,habitos): consultar category_budgets del mes en vez d
 - Modify: `supabase/functions/transfer-ingest/index.ts:128, 160, 266-267, 398-399, 411`
 
 **Interfaces:**
-- Consumes: schema nuevo de `categories` (Task 1, ya debe estar aplicado en producción antes de este paso — ver Global Constraints y Task 1 Step 7).
+- Consumes: schema nuevo de `categories` (Task 1, ya debe estar aplicado en producción antes de este paso — ver Global Constraints y Task 1 Step 3).
 
 - [ ] **Step 1: Quitar `.eq('month', month)` de las 3 búsquedas de categoría**
 
@@ -1343,7 +1337,7 @@ por:
 
 Vía `mcp__claude_ai_Supabase__deploy_edge_function` sobre el proyecto `gfswrtyxgsxakkpgduda`, function `transfer-ingest`, con `verify_jwt: false` (mismo valor que la versión actual — confirmar con `mcp__claude_ai_Supabase__list_edge_functions` antes de desplegar).
 
-Este paso se ejecuta como parte del Task 1 Step 7 (inmediatamente después de aplicar la migración a producción) — si esta Task se hace por separado, no soltar el checkpoint de Task 1 hasta que esta Task esté desplegada.
+Este paso se ejecuta como parte del Task 1 Step 3 (inmediatamente después de aplicar la migración a producción) — si esta Task se hace por separado, no soltar el checkpoint de Task 1 hasta que esta Task esté desplegada.
 
 - [ ] **Step 3: Verificación manual**
 
