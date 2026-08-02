@@ -117,7 +117,6 @@ Deno.serve(async (req) => {
         .select('id')
         .eq('profile_id', profileId)
         .eq('name', match.category_name)
-        .eq('month', month)
         .limit(1)
         .maybeSingle()
       if (cat) categoryId = cat.id

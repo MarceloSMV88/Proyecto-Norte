@@ -126,7 +126,7 @@ Deno.serve(async (req) => {
     if (card) {
       const month = dateStr.slice(0, 7) + '-01'
       const { data: catRow } = await sb.from('categories').select('id')
-        .eq('profile_id', profileId).eq('name', 'Tarjetas de crédito').eq('month', month).limit(1).maybeSingle()
+        .eq('profile_id', profileId).eq('name', 'Tarjetas de crédito').limit(1).maybeSingle()
       if (catRow) await linkCommitment(sb, profileId, catRow.id, ins![0].id, label, '', amt, dateStr)
     }
 
@@ -158,7 +158,7 @@ Deno.serve(async (req) => {
 
     let categoryId: string | null = null
     const { data: cat } = await sb.from('categories').select('id')
-      .eq('profile_id', profileId).eq('name', 'Ahorro - Personal').eq('month', month).limit(1).maybeSingle()
+      .eq('profile_id', profileId).eq('name', 'Ahorro - Personal').limit(1).maybeSingle()
     if (cat) categoryId = cat.id
 
     const rows: Record<string, unknown>[] = []
@@ -264,7 +264,7 @@ Deno.serve(async (req) => {
         .sort((r1, r2) => String(r2.pattern).length - String(r1.pattern).length)[0]
       if (match) {
         const { data: cat } = await sb.from('categories').select('id')
-          .eq('profile_id', profileId).eq('name', match.category_name).eq('month', month).limit(1).maybeSingle()
+          .eq('profile_id', profileId).eq('name', match.category_name).limit(1).maybeSingle()
         if (cat) categoryId = cat.id
       }
     }
@@ -396,7 +396,7 @@ Deno.serve(async (req) => {
         .sort((r1, r2) => String(r2.pattern).length - String(r1.pattern).length)[0]
       if (match) {
         const { data: cat } = await sb.from('categories').select('id')
-          .eq('profile_id', profileId).eq('name', match.category_name).eq('month', month).limit(1).maybeSingle()
+          .eq('profile_id', profileId).eq('name', match.category_name).limit(1).maybeSingle()
         if (cat) gastoCategoryId = cat.id
       }
     }
@@ -409,7 +409,7 @@ Deno.serve(async (req) => {
   let savingsCategoryId: string | null = null
   if (txType === 'transfer' && destAcc && /ahorro premium/i.test(destAcc.name)) {
     const { data: cat } = await sb.from('categories').select('id')
-      .eq('profile_id', profileId).eq('name', 'Ahorro - Personal').eq('month', month).limit(1).maybeSingle()
+      .eq('profile_id', profileId).eq('name', 'Ahorro - Personal').limit(1).maybeSingle()
     if (cat) savingsCategoryId = cat.id
   }
 
