@@ -65,56 +65,17 @@ create table public.category_budgets (
 
 create index category_budgets_month_idx on public.category_budgets(month);
 
--- 4. Backfill de categories: agrupar filas viejas por (profile_id, nombre) -> una fila
---    estable por grupo. icon/color/group_name/fixed se toman de la fila MÁS RECIENTE.
-insert into public.categories (id, profile_id, name, icon, color, group_name, fixed, active, created_at)
-select distinct on (profile_id, name)
-  gen_random_uuid(), profile_id, name, icon, color, group_name, fixed, true, created_at
-from public.categories_monthly_old
-order by profile_id, name, month desc;
+-- 4. Redefinir las 3 funciones AHORA, antes de tocar transactions (punto 8): transactions
+--    tiene el trigger trg_sync_category_spent (migración 008) que dispara sync_category_spent()
+--    en cada UPDATE. Si se tocara transactions antes de redefinir esta función, el trigger
+--    correría con el body VIEJO (el de la migración 008), que hace
+--    "update public.categories set spent=... where month=..." — y la public.categories de
+--    ACÁ EN ADELANTE ya es la tabla nueva sin columnas month/spent -> falla con
+--    "column month does not exist". Encontrado en el primer intento de aplicar esta
+--    migración (ver task-1-report.md): el error no lo agarró el bloque de verificación,
+--    lo agarró Postgres antes de llegar ahí — el orden de las sentencias importa acá.
 
--- 5. Backfill de category_budgets: cada fila vieja -> su fila de presupuesto, ligada a
---    la categoría estable recién creada (match por profile_id+name, mismo criterio que
---    ya usaba copyPreviousMonth en Compromisos).
-insert into public.category_budgets (category_id, month, assigned, spent)
-select c.id, old.month, old.assigned, old.spent
-from public.categories_monthly_old old
-join public.categories c on c.profile_id = old.profile_id and c.name = old.name;
-
--- 6. Mapeo id-viejo -> id-nuevo (vive solo durante esta sesión/script) para remapear las FKs.
-create temporary table cat_id_map as
-select old.id as old_id, c.id as new_id
-from public.categories_monthly_old old
-join public.categories c on c.profile_id = old.profile_id and c.name = old.name;
-
--- 7. Remapear transactions.category_id
-alter table public.transactions drop constraint if exists transactions_category_id_fkey;
-update public.transactions t
-set category_id = m.new_id
-from cat_id_map m
-where t.category_id = m.old_id;
-alter table public.transactions
-  add constraint transactions_category_id_fkey foreign key (category_id) references public.categories(id) on delete set null;
-
--- 8. Remapear monthly_commitments.category_id
-alter table public.monthly_commitments drop constraint if exists monthly_commitments_category_id_fkey;
-update public.monthly_commitments mc
-set category_id = m.new_id
-from cat_id_map m
-where mc.category_id = m.old_id;
-alter table public.monthly_commitments
-  add constraint monthly_commitments_category_id_fkey foreign key (category_id) references public.categories(id) on delete restrict;
-
--- 9. RLS de las tablas nuevas (mismo criterio que el resto del schema: visible_profile_ids()).
-alter table public.categories enable row level security;
-create policy "categories_all" on public.categories
-  for all using (profile_id in (select visible_profile_ids()));
-
-alter table public.category_budgets enable row level security;
-create policy "category_budgets_all" on public.category_budgets
-  for all using (category_id in (select id from public.categories where profile_id in (select visible_profile_ids())));
-
--- 10. ensure_month_budgets: crea la fila de presupuesto de cada categoría activa que no
+-- 4a. ensure_month_budgets: crea la fila de presupuesto de cada categoría activa que no
 --     la tenga aún para ese mes, heredando el assigned de su fila anterior más reciente
 --     (0 si es la primera vez). Idempotente.
 create or replace function public.ensure_month_budgets(p_profile_id uuid, p_month date)
@@ -138,7 +99,7 @@ begin
 end;
 $$;
 
--- 11. sync_category_spent: ahora opera sobre category_budgets y hace upsert de la fila
+-- 4b. sync_category_spent: ahora opera sobre category_budgets y hace upsert de la fila
 --     del mes si todavía no existe (categorizar en un mes "no preparado" nunca falla).
 create or replace function public.sync_category_spent()
 returns trigger
@@ -186,7 +147,7 @@ begin
 end;
 $function$;
 
--- 12. seed_default_categories: ahora siembra categorías estables + su primera fila de
+-- 4c. seed_default_categories: ahora siembra categorías estables + su primera fila de
 --     presupuesto (se usa una sola vez, al crear un perfil nuevo — ver AuthContext.tsx).
 create or replace function public.seed_default_categories(p_profile_id uuid)
 returns void
@@ -225,7 +186,81 @@ begin
 end;
 $$;
 
--- 13. La tabla vieja NO se borra en este script — se deja renombrada como
+-- 5. Backfill de categories: agrupar filas viejas por (profile_id, nombre) -> una fila
+--    estable por grupo. icon/color/group_name/fixed se toman de la fila MÁS RECIENTE.
+insert into public.categories (id, profile_id, name, icon, color, group_name, fixed, active, created_at)
+select distinct on (profile_id, name)
+  gen_random_uuid(), profile_id, name, icon, color, group_name, fixed, true, created_at
+from public.categories_monthly_old
+order by profile_id, name, month desc;
+
+-- 6. Backfill de category_budgets: cada fila vieja -> su fila de presupuesto, ligada a
+--    la categoría estable recién creada (match por profile_id+name, mismo criterio que
+--    ya usaba copyPreviousMonth en Compromisos).
+insert into public.category_budgets (category_id, month, assigned, spent)
+select c.id, old.month, old.assigned, old.spent
+from public.categories_monthly_old old
+join public.categories c on c.profile_id = old.profile_id and c.name = old.name;
+
+-- 7. Mapeo id-viejo -> id-nuevo (vive solo durante esta sesión/script) para remapear las FKs.
+create temporary table cat_id_map as
+select old.id as old_id, c.id as new_id
+from public.categories_monthly_old old
+join public.categories c on c.profile_id = old.profile_id and c.name = old.name;
+
+-- 8. Remapear transactions.category_id (la función del punto 4b ya está activa, así que
+--    el trigger que dispara este UPDATE corre con el body NUEVO — sin esto, falla).
+alter table public.transactions drop constraint if exists transactions_category_id_fkey;
+update public.transactions t
+set category_id = m.new_id
+from cat_id_map m
+where t.category_id = m.old_id;
+alter table public.transactions
+  add constraint transactions_category_id_fkey foreign key (category_id) references public.categories(id) on delete set null;
+
+-- 9. Remapear monthly_commitments.category_id
+alter table public.monthly_commitments drop constraint if exists monthly_commitments_category_id_fkey;
+update public.monthly_commitments mc
+set category_id = m.new_id
+from cat_id_map m
+where mc.category_id = m.old_id;
+alter table public.monthly_commitments
+  add constraint monthly_commitments_category_id_fkey foreign key (category_id) references public.categories(id) on delete restrict;
+
+-- 10. Remapear subscriptions.category_id y upcoming.category_id — ambas tablas están
+--     vacías hoy pero son features activas (subscriptions en habitos/page.tsx, upcoming
+--     en resumen/page.tsx con un embedded select "categories(name,icon)"), y sus FKs
+--     apuntan a categories(id) igual que transactions/monthly_commitments. Al renombrar
+--     la tabla vieja (punto 1), esas 2 FKs quedaron apuntando a categories_monthly_old
+--     en vez de a la nueva — sin este remap, Task 9 (DROP TABLE categories_monthly_old)
+--     falla por dependencia, y cualquier insert futuro en estas 2 tablas rompe la FK.
+--     (Encontrado en el primer intento de aplicar esta migración, ver task-1-report.md.)
+alter table public.subscriptions drop constraint if exists subscriptions_category_id_fkey;
+update public.subscriptions s
+set category_id = m.new_id
+from cat_id_map m
+where s.category_id = m.old_id;
+alter table public.subscriptions
+  add constraint subscriptions_category_id_fkey foreign key (category_id) references public.categories(id) on delete set null;
+
+alter table public.upcoming drop constraint if exists upcoming_category_id_fkey;
+update public.upcoming u
+set category_id = m.new_id
+from cat_id_map m
+where u.category_id = m.old_id;
+alter table public.upcoming
+  add constraint upcoming_category_id_fkey foreign key (category_id) references public.categories(id) on delete set null;
+
+-- 11. RLS de las tablas nuevas (mismo criterio que el resto del schema: visible_profile_ids()).
+alter table public.categories enable row level security;
+create policy "categories_all" on public.categories
+  for all using (profile_id in (select visible_profile_ids()));
+
+alter table public.category_budgets enable row level security;
+create policy "category_budgets_all" on public.category_budgets
+  for all using (category_id in (select id from public.categories where profile_id in (select visible_profile_ids())));
+
+-- 12. La tabla vieja NO se borra en este script — se deja renombrada como
 --     categories_monthly_old. Se borra manualmente (DROP TABLE) en la Task 9,
 --     después de confirmar que todo el plan quedó QA'eado.
 ```
@@ -250,7 +285,7 @@ declare
   v_old_rows bigint; v_new_rows bigint;
   v_old_sum_a bigint; v_new_sum_a bigint;
   v_old_sum_s bigint; v_new_sum_s bigint;
-  v_orphan_tx bigint; v_orphan_cm bigint;
+  v_orphan_tx bigint; v_orphan_cm bigint; v_orphan_sub bigint; v_orphan_up bigint;
 begin
   select count(*), sum(assigned), sum(spent) into v_old_rows, v_old_sum_a, v_old_sum_s from public.categories_monthly_old;
   select count(*), sum(assigned), sum(spent) into v_new_rows, v_new_sum_a, v_new_sum_s from public.category_budgets;
@@ -258,6 +293,10 @@ begin
     where category_id is not null and category_id not in (select id from public.categories);
   select count(*) into v_orphan_cm from public.monthly_commitments
     where category_id not in (select id from public.categories);
+  select count(*) into v_orphan_sub from public.subscriptions
+    where category_id is not null and category_id not in (select id from public.categories);
+  select count(*) into v_orphan_up from public.upcoming
+    where category_id is not null and category_id not in (select id from public.categories);
 
   if v_old_rows <> v_new_rows or v_old_sum_a is distinct from v_new_sum_a or v_old_sum_s is distinct from v_new_sum_s then
     raise exception 'Verificación falló: filas viejas=% nuevas=% · assigned viejo=% nuevo=% · spent viejo=% nuevo=%',
@@ -268,6 +307,12 @@ begin
   end if;
   if v_orphan_cm > 0 then
     raise exception 'Verificación falló: % compromisos quedaron huérfanos', v_orphan_cm;
+  end if;
+  if v_orphan_sub > 0 then
+    raise exception 'Verificación falló: % suscripciones quedaron huérfanas', v_orphan_sub;
+  end if;
+  if v_orphan_up > 0 then
+    raise exception 'Verificación falló: % upcoming quedaron huérfanos', v_orphan_up;
   end if;
 
   raise notice 'Verificación OK: % filas migradas, assigned=%, spent=%, sin huérfanos', v_new_rows, v_new_sum_a, v_new_sum_s;
