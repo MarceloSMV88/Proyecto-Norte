@@ -134,7 +134,7 @@ export interface MonthlyCommitment {
   status: CommitmentStatus
   month: string
   created_at: string
-  categories?: { name: string; icon: string; color: string; group_name: CategoryGroup; assigned: number; spent: number } | null
+  categories?: { name: string; icon: string; color: string; group_name: CategoryGroup } | null
   accounts?: { name: string } | null
   transactions?: { name: string; amount: number; date: string } | null
 }

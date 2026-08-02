@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { Plus, Pencil, ChevronDown, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
+import { useToast } from '@/components/ui/Toast'
 import Topbar from '@/components/layout/Topbar'
 import CategoryModal from '@/components/modals/CategoryModal'
 import { clp, computeSummary, flattenCategoryBudgets, formatDate, getCurrentMonth } from '@/lib/utils'
@@ -20,6 +21,7 @@ function nextMonthStr(month: string): string {
 export default function PresupuestoPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
+  const { showToast } = useToast()
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
   const [categories, setCategories] = useState<CategoryWithBudget[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -73,7 +75,8 @@ export default function PresupuestoPage() {
     setEditing(null)
     const n = parseInt(val.replace(/\D/g, ''))
     if (isNaN(n)) return
-    await supabase.from('category_budgets').update({ assigned: n }).eq('category_id', id).eq('month', selectedMonth)
+    const { error } = await supabase.from('category_budgets').update({ assigned: n }).eq('category_id', id).eq('month', selectedMonth)
+    if (error) showToast('No se pudo guardar el monto asignado')
     load()
   }
 
