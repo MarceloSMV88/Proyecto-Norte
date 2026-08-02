@@ -208,13 +208,29 @@ select old.id as old_id, c.id as new_id
 from public.categories_monthly_old old
 join public.categories c on c.profile_id = old.profile_id and c.name = old.name;
 
--- 8. Remapear transactions.category_id (la función del punto 4b ya está activa, así que
---    el trigger que dispara este UPDATE corre con el body NUEVO — sin esto, falla).
+-- 8. Remapear transactions.category_id. La función del punto 4b ya está activa, pero
+--    trg_sync_category_spent además tiene una rama "OLD.category_id <> NEW.category_id"
+--    (recategorización real de un movimiento) que para ESTE update interpretaría
+--    OLD.category_id como si fuera una categoría válida vigente — y no lo es, es un id
+--    viejo de categories_monthly_old que no existe en la categories nueva, así que
+--    intenta insertar en category_budgets con un category_id que viola la FK. Encontrado
+--    en el segundo intento de aplicar esta migración (ver task-1-report.md): la migración
+--    ya no falla por la columna "month" (fix anterior), pero sigue fallando acá porque
+--    esta rama del trigger no está pensada para una sustitución masiva de IDs, sino para
+--    cuando un usuario recategoriza un movimiento a mano. Los valores de spent ya quedaron
+--    bien calculados por el backfill del punto 6, así que no hace falta que el trigger
+--    recalcule nada acá — se desactiva SOLO para este UPDATE puntual (no para el resto de
+--    la migración) y se reactiva inmediatamente después.
+--    (trg_sync_account_balance, el otro trigger de transactions, no se toca: solo mira
+--    account_id/amount, que este UPDATE no cambia — resta y suma el mismo amount a la
+--    misma cuenta, neto cero, verificado leyendo su body en 006_account_balance_trigger.sql.)
 alter table public.transactions drop constraint if exists transactions_category_id_fkey;
+alter table public.transactions disable trigger trg_sync_category_spent;
 update public.transactions t
 set category_id = m.new_id
 from cat_id_map m
 where t.category_id = m.old_id;
+alter table public.transactions enable trigger trg_sync_category_spent;
 alter table public.transactions
   add constraint transactions_category_id_fkey foreign key (category_id) references public.categories(id) on delete set null;
 
