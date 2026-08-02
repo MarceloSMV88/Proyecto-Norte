@@ -85,6 +85,13 @@ Al categorizar una transacción, además de sumar `spent`, hace upsert de la fil
 - El guard `disabled={... || categories.length === 0}` del botón "Traer mes anterior" pasa a verificar "existe al menos una categoría activa" en vez de "el mes ya tiene categorías".
 - El placeholder del select de categoría en `CommitmentModal` ("Crea categorías para este mes primero") pasa a "Crea una categoría primero", ya que dejar de estar ligado al mes hace que el mensaje original ya no sea preciso.
 
+### Resumen y Hábitos (`app/(app)/resumen/page.tsx`, `app/(app)/habitos/page.tsx`)
+
+*(Agregado tras revisar el código antes de escribir el plan de implementación — no estaban en el análisis original de pantallas, pero ambas consultan `categories` filtrando `.eq('month', selectedMonth)`, así que se rompen igual que las otras si no se ajustan.)*
+
+- Mismo cambio mecánico que Presupuesto: la consulta pasa a traer `category_budgets` del mes con su categoría anidada, aplanado al resultado que ya esperan `computeSummary` y el resto del render (que siguen usando `cat.assigned`/`cat.spent`/`cat.name` sin cambios).
+- Ninguna de las dos llama a `ensure_month_budgets` — son pantallas de solo lectura, y si un mes no tiene filas de presupuesto (porque nunca se abrió Presupuesto ni se categorizó nada), mostrar $0 asignado/gastado es el comportamiento correcto, no un bug.
+
 ### Edge Functions (`supabase/functions/`)
 
 `transfer-ingest/index.ts` tiene 3 lugares que buscan la categoría con `.eq('name', ...).eq('month', month)` (pago de TC, cuotas Coopeuch, y el flujo genérico de "Ahorro - Personal"). Como `categories` deja de tener columna `month`, estas 3 consultas se rompen si no se ajustan — se elimina el `.eq('month', month)` de esas 3 líneas (la búsqueda por nombre+perfil sigue siendo única sin el filtro de mes). `wallet-ingest` y `notif-ingest` ya buscan solo por nombre — no requieren cambios.
