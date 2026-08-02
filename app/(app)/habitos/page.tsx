@@ -4,8 +4,8 @@ import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
 import BarPairs from '@/components/charts/BarPairs'
-import { clp, clpShort, getCurrentMonth, todayCL } from '@/lib/utils'
-import type { Category, Subscription, Transaction, MonthlyBar } from '@/lib/types'
+import { clp, clpShort, flattenCategoryBudgets, getCurrentMonth, todayCL } from '@/lib/utils'
+import type { CategoryWithBudget, CategoryBudgetJoinRow, Subscription, Transaction, MonthlyBar } from '@/lib/types'
 
 const USAGE_COLOR = { alto: 'var(--ok)', medio: 'var(--warn)', bajo: 'var(--danger)' } as const
 const USAGE_LABEL = { alto: 'Alto uso', medio: 'Uso medio', bajo: 'Bajo uso' } as const
@@ -14,7 +14,7 @@ export default function HabitosPage() {
   const { activeProfile } = useProfiles()
   const supabase = createClient()
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
-  const [categories, setCategories] = useState<Category[]>([])
+  const [categories, setCategories] = useState<CategoryWithBudget[]>([])
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([])
   const [months, setMonths] = useState<MonthlyBar[]>([])
 
@@ -23,11 +23,12 @@ export default function HabitosPage() {
     const pid = activeProfile.id
     const month = selectedMonth
     const [cats, subs, txs] = await Promise.all([
-      supabase.from('categories').select('*').eq('profile_id', pid).eq('month', month),
+      supabase.from('category_budgets').select('id, assigned, spent, categories!inner(id, profile_id, name, icon, color, group_name, fixed, active, created_at)')
+        .eq('categories.profile_id', pid).eq('month', month),
       supabase.from('subscriptions').select('*').eq('profile_id', pid).order('amount', { ascending: false }),
       supabase.from('transactions').select('date,amount,type').eq('profile_id', pid).order('date'),
     ])
-    setCategories((cats.data || []) as Category[])
+    setCategories(flattenCategoryBudgets((cats.data || []) as unknown as CategoryBudgetJoinRow[]))
     setSubscriptions((subs.data || []) as Subscription[])
 
     // Build monthly bars

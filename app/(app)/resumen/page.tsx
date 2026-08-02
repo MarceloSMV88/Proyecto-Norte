@@ -5,9 +5,9 @@ import { createClient } from '@/lib/supabase/client'
 import { useProfiles } from '@/contexts/ProfileContext'
 import Topbar from '@/components/layout/Topbar'
 import BarPairs from '@/components/charts/BarPairs'
-import { clp, clpShort, computeSummary, formatDate, getDaysLeftInMonth, getCurrentMonth, todayCL } from '@/lib/utils'
+import { clp, clpShort, computeSummary, flattenCategoryBudgets, formatDate, getDaysLeftInMonth, getCurrentMonth, todayCL } from '@/lib/utils'
 import { catEmoji } from '@/lib/icons'
-import type { Category, Account, Goal, Transaction, Upcoming, MonthlyBar } from '@/lib/types'
+import type { CategoryWithBudget, CategoryBudgetJoinRow, Account, Goal, Transaction, Upcoming, MonthlyBar } from '@/lib/types'
 import TransactionModal from '@/components/modals/TransactionModal'
 import GoalModal from '@/components/modals/GoalModal'
 
@@ -27,7 +27,7 @@ export default function ResumenPage() {
   const supabase = createClient()
 
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
-  const [categories, setCategories] = useState<Category[]>([])
+  const [categories, setCategories] = useState<CategoryWithBudget[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [goals, setGoals] = useState<Goal[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
@@ -46,7 +46,8 @@ export default function ResumenPage() {
     const nextMonthStr = nextM.toISOString().slice(0, 7) + '-01'
 
     const [cats, accs, gls, txs, upcs] = await Promise.all([
-      supabase.from('categories').select('*').eq('profile_id', pid).eq('month', selectedMonth),
+      supabase.from('category_budgets').select('id, assigned, spent, categories!inner(id, profile_id, name, icon, color, group_name, fixed, active, created_at)')
+        .eq('categories.profile_id', pid).eq('month', selectedMonth),
       supabase.from('accounts').select('*').eq('profile_id', pid),
       supabase.from('goals').select('*').eq('profile_id', pid).order('created_at').limit(3),
       supabase.from('transactions').select('*, categories(name,icon,color), accounts(name)')
@@ -56,7 +57,7 @@ export default function ResumenPage() {
       supabase.from('upcoming').select('*, categories(name,icon), accounts(name)')
         .eq('profile_id', pid).order('due_date').limit(4),
     ])
-    setCategories((cats.data || []) as Category[])
+    setCategories(flattenCategoryBudgets((cats.data || []) as unknown as CategoryBudgetJoinRow[]))
     setAccounts((accs.data || []) as Account[])
     setGoals((gls.data || []) as Goal[])
     setTransactions((txs.data || []) as Transaction[])
