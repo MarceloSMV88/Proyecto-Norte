@@ -363,8 +363,15 @@ export default function CompromisosPage() {
     }
     const previous = (data || []) as MonthlyCommitment[]
     // La categoría es la misma fila estable todos los meses (Task 1) — ya no hace falta
-    // matchear por nombre contra las categorías de este mes.
-    const payload: CommitmentInsert[] = previous.map(c => ({
+    // matchear por nombre contra las categorías de este mes. Igual hay que filtrar las
+    // que apunten a una categoría desactivada desde entonces (Task 3, toggle "Activa"):
+    // `categories` acá ya viene filtrado a activas (Step 1), así que un compromiso viejo
+    // ligado a una categoría retirada no debe copiarse — quedaría con un category_id que
+    // no aparece en el dropdown del modal (activo pero "invisible" para el usuario).
+    const activeCategoryIds = new Set(categories.map(c => c.id))
+    const eligible = previous.filter(c => activeCategoryIds.has(c.category_id))
+    const skipped = previous.length - eligible.length
+    const payload: CommitmentInsert[] = eligible.map(c => ({
       profile_id: activeProfile.id,
       category_id: c.category_id,
       account_id: c.account_id,
@@ -381,13 +388,13 @@ export default function CompromisosPage() {
 
     if (!payload.length) {
       setCopying(false)
-      showToast('El mes anterior no tiene compromisos')
+      showToast(skipped > 0 ? 'Los compromisos del mes anterior tienen categorías retiradas' : 'El mes anterior no tiene compromisos')
       return
     }
     const { error: insertError } = await supabase.from('monthly_commitments').insert(payload)
     setCopying(false)
     if (insertError) { showToast('Error al traer mes anterior'); return }
-    showToast('Compromisos del mes anterior copiados')
+    showToast(skipped > 0 ? `Compromisos copiados (${skipped} omitido${skipped > 1 ? 's' : ''} por categoría retirada)` : 'Compromisos del mes anterior copiados')
     load()
   }
 
