@@ -281,9 +281,19 @@ function parseSantanderPagoTC(txt) {
 function parseSantanderMultipago(txt) {
   const date = g(/fecha\s+(\d{1,2}-\d{1,2}-\d{4})/i, txt).replace(/-/g, '/');
   const iDatos = txt.search(/Datos\s+del\s+pago/i);
-  const blk = iDatos > -1 ? txt.slice(iDatos) : txt;
+  let blk = iDatos > -1 ? txt.slice(iDatos) : txt;
+  // Recortar el encabezado de la tabla ("Compañía N° Cliente Fecha de venc. Monto") antes de
+  // parsear las filas: como el charset del nombre ahora acepta puntuación (ver abajo), sin
+  // recortar el encabezado el "." de "venc." haría que la primera fila capture texto del header.
+  // "Monto pagado" queda ANTES de "Datos del pago", así que el primer "Monto" del bloque es el
+  // encabezado de columna.
+  const iMonto = blk.search(/Monto/i);
+  if (iMonto > -1) blk = blk.slice(iMonto + 5);
   const items = [];
-  const re = /([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ0-9 ]*?)\s+([\w-]{4,})\s+\d{4}-\d{2}-\d{2}\s+\$\s*([\d.,]+)/g;
+  // Nombre de compañía: letras/números/espacios + puntuación común (. / & , ( ) -), lazy.
+  // Antes el charset NO incluía "." ni "/", así que "Aguas andinas s.a." y "Gasco glp s.a." no
+  // matcheaban (se perdían del pago) y "Autopista central / autopase" quedaba cortado a "autopase".
+  const re = /([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ0-9 .\/&,()-]*?)\s+([\w-]{4,})\s+\d{4}-\d{2}-\d{2}\s+\$\s*([\d.,]+)/g;
   let m;
   while ((m = re.exec(blk)) !== null) {
     items.push({
