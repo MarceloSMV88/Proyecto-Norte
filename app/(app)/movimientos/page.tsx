@@ -33,6 +33,7 @@ export default function MovimientosPage() {
   const [dateTo, setDateTo] = useState('')
   const [modal, setModal] = useState<'gasto' | 'ingreso' | null>(null)
   const [editingCat, setEditingCat] = useState<string | null>(null)
+  const [editingAcc, setEditingAcc] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!activeProfile) return
@@ -67,6 +68,17 @@ export default function MovimientosPage() {
     setEditingCat(null)
     const { error } = await supabase.from('transactions').update({ category_id: categoryId || null }).eq('id', txId)
     if (error) { showToast('No se pudo categorizar'); return }
+    load()
+  }
+
+  // Asignar/cambiar la cuenta de un movimiento (ej: cargos que se ingestan sin cuenta, como
+  // Copec, donde el comprobante no dice la tarjeta). El trigger sync_account_balance ajusta
+  // solo los saldos ante el UPDATE de account_id (quita el monto de la cuenta vieja si había
+  // y lo suma a la nueva).
+  async function setTxAccount(txId: string, accountId: string) {
+    setEditingAcc(null)
+    const { error } = await supabase.from('transactions').update({ account_id: accountId || null }).eq('id', txId)
+    if (error) { showToast('No se pudo asignar la cuenta'); return }
     load()
   }
 
@@ -202,7 +214,28 @@ export default function MovimientosPage() {
                           ) : (
                             tx.categories?.name && <span>{tx.categories.name}</span>
                           )}
-                          {tx.accounts?.name && <span>· {tx.accounts.name}</span>}
+                          {editingAcc === tx.id ? (
+                            <select
+                              autoFocus
+                              className="role-select"
+                              value={tx.account_id || ''}
+                              onChange={e => setTxAccount(tx.id, e.target.value)}
+                              onBlur={() => setEditingAcc(null)}
+                              style={{ maxWidth: 160 }}
+                            >
+                              <option value="">Sin cuenta</option>
+                              {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                            </select>
+                          ) : (
+                            <button
+                              onClick={() => setEditingAcc(tx.id)}
+                              title="Asignar cuenta"
+                              className="chip xs"
+                              style={tx.accounts?.name ? undefined : { color: 'var(--warn)', borderColor: 'color-mix(in oklab, var(--warn) 40%, var(--border))' }}
+                            >
+                              {tx.accounts?.name || 'Sin cuenta'}
+                            </button>
+                          )}
                         </div>
                       </div>
                       <span style={{ fontSize: 15, fontWeight: 700, fontFamily: 'var(--font-ui)', color: isIncome ? 'var(--ok)' : 'var(--text)', flexShrink: 0 }}>

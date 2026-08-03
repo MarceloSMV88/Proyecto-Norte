@@ -21,7 +21,8 @@ const SEARCH   = '((from:santander.cl OR from:bancochile.cl OR from:bancoripley.
                + 'OR (from:metlife.cl subject:(dividendo)) '
                + 'OR (from:transaccionalcoopeuch.com subject:(Cuotas)) '
                + 'OR (from:bancoestado.cl subject:(Comprobante OR Transferencias)) '
-               + 'OR (from:indexa.cl subject:("Aviso de Pagos"))';
+               + 'OR (from:indexa.cl subject:("Aviso de Pagos")) '
+               + 'OR (from:appcopec.com subject:("Comprobante de compra"))';
 
 // Gate por MARCA DE TIEMPO (no por etiqueta de hilo). Santander agrupa TODAS las
 // transferencias en un mismo hilo (mismo asunto "Comprobante Transferencia de fondos"); si
@@ -75,6 +76,8 @@ function procesarTransferencias() {
       // indexa.cl manda HTML puro (iso-8859-1, sin parte text/plain): getPlainBody() puede
       // venir vacío -> fallback al HTML crudo (el parser limpia tags/entidades él mismo).
       else if (from.indexOf('indexa') > -1)      data = parseAssetplanPago(body && body.trim() ? body : msg.getBody());
+      // Copec: getPlainBody viene casi vacío ("Comprobante de compra Copec") -> siempre el HTML crudo.
+      else if (from.indexOf('appcopec') > -1)    data = parseCopec(msg.getBody());
       if (!data) return;
 
       // Un parser puede devolver varios items (ej: "Comprobante de pago" con N cuentas pagadas)
@@ -443,6 +446,28 @@ function parseAssetplanPago(raw) {
     destBank:    g(/cuenta\s+[\d.\-]+\s+de\s+(Banco\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+|[A-Za-zÁÉÍÓÚÑáéíóúñ]+)/i, txt) || 'Santander',
     destMine:    true,
     comment:     'Arriendo Assetplan',
+  };
+}
+
+// ── Copec (carga de combustible vía App Copec, mail info@appcopec.com) ──
+// El comprobante viene como HTML (getPlainBody trae casi nada, solo "Comprobante de compra
+// Copec") -> se parsea el HTML crudo. El cargo real es el "Total" (hay un Subtotal mayor y un
+// Descuento); "El total de tu compra fue: $X" ya trae ese total, y [^$]* corta antes del
+// primer $ (no agarra el subtotal). El mail NO dice la tarjeta -> se manda SIN cuenta a
+// propósito (el usuario puede cambiar de tarjeta, así que le asigna la cuenta a mano desde
+// Movimientos). Va como pago_servicio con empresa 'COPEC' -> la regla COPEC->Transporte lo
+// categoriza; transfer-ingest lo inserta con account_id null al no venir cuenta ni banco.
+function parseCopec(raw) {
+  const txt = raw.replace(/<[^>]+>/g, ' ')
+    .replace(/&aacute;/gi, 'á').replace(/&eacute;/gi, 'é').replace(/&iacute;/gi, 'í')
+    .replace(/&oacute;/gi, 'ó').replace(/&uacute;/gi, 'ú').replace(/&ntilde;/gi, 'ñ')
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&deg;/gi, '°')
+    .replace(/[\r\n]+/g, ' ');
+  return {
+    kind: 'pago_servicio',
+    empresa: 'COPEC',
+    amount: money(txt, /total de tu compra fue[^$]*\$\s*([\d.]+)/i),
+    date: g(/Fecha[:\s]*(\d{4}-\d{2}-\d{2})/i, txt),
   };
 }
 
