@@ -369,17 +369,34 @@ Deno.serve(async (req) => {
     if (dup) return json({ ok: true, inserted: false, reason: 'duplicate', matched: c.id })
   }
 
-  // Dedup cross-fuente: la misma transferencia ya pudo llegar por notificación push
-  // (notif-ingest, source 'bank_app') antes que por este mail — el push llega casi al
-  // instante, el mail se procesa por polling. bank_app no escribe tags #oa/#da en la
-  // descripción, así que el match es por fecha + monto + cuenta ya resuelta de cada lado.
+  // Dedup cross-fuente POR PATA (no por transferencia entera): la misma transferencia ya pudo
+  // llegar por notificación push (notif-ingest, source 'bank_app') antes que por este mail — el
+  // push llega casi al instante, el mail se procesa por polling. bank_app no escribe tags
+  // #oa/#da, así que el match es por fecha + monto + cuenta ya resuelta de cada lado.
+  // OJO (bug corregido 2026-08-03): la push solo trae UNA pata (la del banco que la emitió), pero
+  // el mail de una transferencia interna trae las DOS. Antes se descartaba el mail ENTERO al ver
+  // una pata ya cubierta, perdiendo la otra pata (la interna quedaba solo con el ingreso del
+  // destino y sin el egreso del origen). Ahora se marca qué pata cubre una push y se excluye SOLO
+  // esa al construir las patas (más abajo), creando la(s) faltante(s).
   const { data: bankAppCands } = await sb.from('transactions').select('id, amount, account_id')
     .eq('profile_id', profileId).eq('source', 'bank_app').eq('date', dateStr).or(`amount.eq.${-amount},amount.eq.${amount}`)
-  const bankAppDup = (bankAppCands ?? []).find(c =>
-    (c.amount === -amount && originAcc && c.account_id === originAcc.id) ||
-    (c.amount === amount && destAcc && c.account_id === destAcc.id)
-  )
-  if (bankAppDup) return json({ ok: true, inserted: false, reason: 'duplicate', matched: bankAppDup.id })
+  const originCoveredByPush = !!(originAcc && (bankAppCands ?? []).some(c => c.amount === -amount && c.account_id === originAcc.id))
+  const destCoveredByPush   = !!(destAcc   && (bankAppCands ?? []).some(c => c.amount === amount  && c.account_id === destAcc.id))
+  // Duplicado real: TODAS las patas relevantes ya cubiertas por una push -> no insertar nada.
+  const allCoveredByPush =
+      txType === 'gasto'   ? (!!originAcc && originCoveredByPush)
+    : txType === 'ingreso' ? (!!destAcc && destCoveredByPush)
+    :                        (!!(originAcc || destAcc) && (!originAcc || originCoveredByPush) && (!destAcc || destCoveredByPush))
+  if (allCoveredByPush) return json({ ok: true, inserted: false, reason: 'duplicate' })
+
+  // Si la pata DESTINO de una transferencia interna ya la registró una push como 'ingreso'
+  // (notif-ingest no puede saber que el origen es una cuenta propia), corregirla a 'transfer'
+  // para que esa plata no cuente como ingreso real.
+  if (txType === 'transfer' && destAcc && destCoveredByPush) {
+    await sb.from('transactions').update({ type: 'transfer' })
+      .eq('profile_id', profileId).eq('source', 'bank_app').eq('date', dateStr)
+      .eq('amount', amount).eq('account_id', destAcc.id).eq('type', 'ingreso')
+  }
 
   const description = `${comment ? comment + ' ' : ''}#oa:${originAcctD} #da:${destAcctD} #ob:${originBankN} #db:${destBankN} #tx:${txnId}`.trim()
 
@@ -417,8 +434,10 @@ Deno.serve(async (req) => {
   type Leg = { account_id: string | null; amount: number; name: string }
   const legs: Leg[] = []
   if (txType === 'transfer') {
-    if (originAcc) legs.push({ account_id: originAcc.id, amount: -amount, name: `Transferencia a ${destBankRaw || destName || 'mis cuentas'}` })
-    if (destAcc) legs.push({ account_id: destAcc.id, amount: amount, name: `Transferencia desde ${originBankRaw || originName || 'mis cuentas'}` })
+    // Excluir la pata que ya registró una push (dedup por pata, ver arriba): así una transferencia
+    // interna cuya pata + ya llegó por push igual crea la pata - faltante del origen.
+    if (originAcc && !originCoveredByPush) legs.push({ account_id: originAcc.id, amount: -amount, name: `Transferencia a ${destBankRaw || destName || 'mis cuentas'}` })
+    if (destAcc && !destCoveredByPush) legs.push({ account_id: destAcc.id, amount: amount, name: `Transferencia desde ${originBankRaw || originName || 'mis cuentas'}` })
     if (legs.length === 0) legs.push({ account_id: null, amount: -amount, name: `Transferencia ${originName || ''} → ${destName || ''}`.trim() })
   } else if (txType === 'ingreso') {
     legs.push({ account_id: destAcc?.id ?? null, amount: amount, name: `Transferencia de ${originName || 'tercero'}` })
