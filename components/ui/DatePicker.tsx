@@ -61,6 +61,18 @@ export default function DatePicker(props: DatePickerProps) {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [close])
 
+  // ESC cierra el calendario (no el modal que lo contiene): se escucha en fase de captura
+  // y se detiene la propagación para que el listener de ESC del modal (bubble) no se dispare
+  // en la misma tecla. Con el calendario cerrado, este effect no corre → ESC llega al modal.
+  useEffect(() => {
+    if (!open) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.stopPropagation(); close() }
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [open, close])
+
   function prevMonth() {
     if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1) }
     else setViewMonth(m => m - 1)
