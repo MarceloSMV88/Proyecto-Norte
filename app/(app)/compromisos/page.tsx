@@ -567,6 +567,7 @@ export default function CompromisosPage() {
         <SplitLinkModal
           commitment={splitFor}
           transactions={transactions}
+          claimedTxIds={claimedTxIds}
           onClose={() => setSplitFor(null)}
           onConfirm={linkPartialTransaction}
         />
@@ -575,9 +576,10 @@ export default function CompromisosPage() {
   )
 }
 
-function SplitLinkModal({ commitment, transactions, onClose, onConfirm }: {
+function SplitLinkModal({ commitment, transactions, claimedTxIds, onClose, onConfirm }: {
   commitment: MonthlyCommitment
   transactions: Transaction[]
+  claimedTxIds: Set<string>
   onClose: () => void
   onConfirm: (commitment: MonthlyCommitment, tx: Transaction, portionStr: string) => void
 }) {
@@ -588,12 +590,17 @@ function SplitLinkModal({ commitment, transactions, onClose, onConfirm }: {
 
   const candidates = transactions
     .filter(t => t.type === 'gasto' && t.amount < 0)
+    .filter(t => !claimedTxIds.has(t.id))  // un movimiento ya vinculado a otro compromiso no se puede re-elegir
     .filter(t => !search || t.name.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => b.date.localeCompare(a.date))
+    // Más reciente → más antiguo (created_at como desempate para movimientos del mismo día).
+    .sort((a, b) => b.date.localeCompare(a.date) || (b.created_at || '').localeCompare(a.created_at || ''))
 
   function pick(tx: Transaction) {
     setSelected(tx)
-    setPortion(String(Math.min(commitment.expected_amount || Math.abs(tx.amount), Math.abs(tx.amount))))
+    // Traer el monto del movimiento SELECCIONADO (no el esperado del compromiso): si seleccionás
+    // A, se trae el valor de A. Si fuera un pago parcial de un movimiento más grande, el usuario
+    // baja el monto a mano.
+    setPortion(String(Math.abs(tx.amount)))
   }
 
   return (
