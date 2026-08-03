@@ -1,5 +1,6 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useAnimatedClose } from '@/lib/useAnimatedClose'
 
@@ -43,7 +44,7 @@ interface RangeProps extends BaseProps {
 type DatePickerProps = SingleProps | RangeProps
 
 export default function DatePicker(props: DatePickerProps) {
-  const { placeholder, clearable, dropUp = true } = props
+  const { placeholder, clearable } = props
   const isRange = props.range === true
 
   const [open, setOpen] = useState(false)
@@ -52,14 +53,44 @@ export default function DatePicker(props: DatePickerProps) {
   const [viewYear, setViewYear] = useState(() => new Date(anchorIso + 'T12:00:00').getFullYear())
   const [viewMonth, setViewMonth] = useState(() => new Date(anchorIso + 'T12:00:00').getMonth())
   const ref = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [coords, setCoords] = useState<{ top: number; left: number; openUp: boolean } | null>(null)
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) close()
+      const t = e.target as Node
+      // El panel vive en un portal (fuera de `ref`): hay que contemplar ambos para el click-fuera.
+      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return
+      close()
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [close])
+
+  // El panel se renderiza en un portal a document.body con position:fixed, posicionado según
+  // el rect del trigger. Antes iba como position:absolute DENTRO del modal, pero `.modal` tiene
+  // `overflow-y:auto` (para scrollear modales largos) y recortaba la parte de arriba del
+  // calendario (encabezado con mes + flechas ◄ ►) cuando abría hacia arriba → no se veía el
+  // encabezado ni se podía cambiar de mes. El portal lo saca de ese overflow. Elige arriba o
+  // abajo según el espacio disponible, y reposiciona ante scroll/resize.
+  useLayoutEffect(() => {
+    if (!open) { setCoords(null); return }
+    const place = () => {
+      const el = ref.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const PANEL_H = 340, PANEL_W = 260, GAP = 6
+      const spaceBelow = window.innerHeight - r.bottom
+      const openUp = spaceBelow < PANEL_H + GAP && r.top > spaceBelow
+      const top = openUp ? Math.max(8, r.top - PANEL_H - GAP) : r.bottom + GAP
+      const left = Math.min(Math.max(8, r.right - PANEL_W), window.innerWidth - PANEL_W - 8)
+      setCoords({ top, left, openUp })
+    }
+    place()
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+    return () => { window.removeEventListener('scroll', place, true); window.removeEventListener('resize', place) }
+  }, [open])
 
   // ESC cierra el calendario (no el modal que lo contiene): se escucha en fase de captura
   // y se detiene la propagación para que el listener de ESC del modal (bubble) no se dispare
@@ -179,20 +210,19 @@ export default function DatePicker(props: DatePickerProps) {
         )}
       </button>
 
-      {open && (
-        <div style={{
-          position: 'absolute',
-          ...(dropUp ? { bottom: '110%' } : { top: '110%' }),
-          right: 0,
-          left: 'auto',
-          zIndex: 200,
+      {open && coords && typeof document !== 'undefined' && createPortal(
+        <div ref={panelRef} style={{
+          position: 'fixed',
+          top: coords.top,
+          left: coords.left,
+          zIndex: 1200,
           background: 'var(--surface)',
           border: '1px solid var(--border-strong)',
           borderRadius: 16,
           padding: 16,
           boxShadow: 'var(--shadow)',
           width: 260,
-          transformOrigin: dropUp ? 'bottom right' : 'top right',
+          transformOrigin: coords.openUp ? 'bottom right' : 'top right',
           animation: closing ? 'dpPopOut .13s ease forwards' : 'fadeIn .15s ease',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -293,7 +323,8 @@ export default function DatePicker(props: DatePickerProps) {
           >
             Ir a hoy
           </button>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
