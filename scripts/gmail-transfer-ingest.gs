@@ -15,7 +15,8 @@ const SECRET   = 'bd7d9dfa18af488ca9b89e3335efedf56a9bdbb5892a4f96bd6dfde12874f2
 const LABEL    = 'norte-procesado';
 // Ojo: "Cargo en Cuenta" (Banco de Chile avisando un cargo de Servipag) NO se agrega a
 // propósito — Servipag ya manda su propio comprobante con el detalle real (empresa/monto);
-// procesar ambos duplicaría el gasto.
+// procesar ambos duplicaría el gasto. SÍ se LEE aparte (ver buscarCargoEnCuenta) para sacarle
+// el único dato que el comprobante de Servipag no trae: la cuenta exacta cargada (****7004).
 const SEARCH   = '((from:santander.cl OR from:bancochile.cl OR from:bancoripley.cl OR from:servipag.cl) '
                + 'subject:(transferencia OR Comprobante OR Transferencias OR Deuda OR Giro)) '
                + 'OR (from:metlife.cl subject:(dividendo)) '
@@ -62,7 +63,9 @@ function procesarTransferencias() {
       if (from.indexOf('santander') > -1)      data = parseSantander(body);
       else if (from.indexOf('bancochile') > -1) data = parseChile(body);
       else if (from.indexOf('ripley') > -1)     data = parseRipley(body);
-      else if (from.indexOf('servipag') > -1)   data = parseServipag(body);
+      // Servipag: se le pasa TAMBIÉN el HTML crudo — el detalle es una tabla y getPlainBody()
+      // la aplana metiendo "<#>" por cada enlace y cortando líneas largas (ver parseServipag).
+      else if (from.indexOf('servipag') > -1)   data = parseServipag(body, msg.getBody());
       else if (from.indexOf('metlife') > -1)    data = parseMetlifeDividendo(body);
       else if (from.indexOf('transaccionalcoopeuch') > -1) data = parseCoopeuchCuotas(body);
       else if (from.indexOf('bancoestado') > -1) {
@@ -376,27 +379,132 @@ function parseBancoEstadoCtasPropias(raw) {
 // Plantilla con 2 tablas ANCHAS (fila de encabezados + fila de valores, no pares etiqueta/valor):
 //   Resumen de pago:  Nombre | Fecha | Hora transacción | Número de consulta | Valor | Forma de pago
 //   Detalle de pago:  Empresa | Nombre | Identificador de cuenta | Valor | Código autorización de pago
-// "Forma de pago" trae solo el NOMBRE del banco (no la cuenta) -> se manda como originBank
-// para que transfer-ingest matchee la cuenta por nombre de banco.
-function parseServipag(txt) {
-  const iDetalle = txt.search(/Detalle\s+de\s+pago/i);
-  const resumenBlk = iDetalle > -1 ? txt.slice(0, iDetalle) : txt;
-  const detalleBlk = iDetalle > -1 ? txt.slice(iDetalle) : '';
+// "Forma de pago" trae solo el NOMBRE del banco (no la cuenta) -> se manda como originBank,
+// complementado con originLast4 sacado del aviso "Cargo en Cuenta" (ver buscarCargoEnCuenta).
+//
+// Devuelve un ARRAY: un pago de Servipag puede traer N cuentas en el detalle (visto en vivo
+// 2026-08-08: 3 items — Vespucio Oriente $31.492 + Ruta 78 $8 + Vespucio Norte $35.320 =
+// $66.820). La versión anterior devolvía un solo item y se habría comido los otros dos.
+//
+// El detalle se lee del HTML (tabla con celdas <td>) y NO del texto plano: getPlainBody()
+// mete un "<#>" por cada enlace ("... Vespucio Oriente 16798718 <#> $ 31.492") y corta las
+// líneas largas a mitad de fila. Eso fue exactamente lo que rompió el parser el 2026-08-08
+// (bad_amount en ingest_failures). El texto plano queda como respaldo si no hay HTML.
+function parseServipag(txt, html) {
+  const base = (txt && txt.trim()) ? txt : stripHtml(html);
+  const iDetalle = base.search(/Detalle\s+de\s+pago/i);
+  const resumenBlk = iDetalle > -1 ? base.slice(0, iDetalle) : base;
 
   const date = g(/(\d{1,2}\/\d{1,2}\/\d{4})/, resumenBlk);
+  // Total del resumen: solo sirve para casar este comprobante con su aviso "Cargo en Cuenta".
+  const total = money(resumenBlk, /\$\s*([\d.,]+)/);
   // Forma de pago: texto alfabético después del monto, en la fila de valores del resumen.
-  const originBank = g(/\$\s*[\d.,]+\s+([A-Za-zÁÉÍÓÚÑáéíóúñ]+(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+)*)/, resumenBlk);
+  // (getPlainBody corta la línea a mitad del nombre: "Banco \nde Chile" -> se colapsa)
+  const originBank = g(/\$\s*[\d.,]+\s+([A-Za-zÁÉÍÓÚÑáéíóúñ]+(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+)*)/, resumenBlk).replace(/\s+/g, ' ');
+  const originLast4 = buscarCargoEnCuenta(total, date);
 
-  // Detalle: tras los 5 encabezados viene la fila de valores: Empresa Nombre Identificador Valor Código
-  const m = detalleBlk.match(/Empresa[\s\S]*?Identificador\s+de\s+cuenta[\s\S]*?Valor[\s\S]*?C[oó]digo\s+autorizaci[oó]n[\s\S]*?pago[\s\S]*?([A-Za-zÁÉÍÓÚÑáéíóúñ0-9().\-\/ ]+?)\s+(\d{5,})\s*\$\s*([\d.,]+)/i);
-  return {
-    kind: 'pago_servicio',
-    empresa: m ? m[1].trim() : '',
-    identificador: m ? m[2].trim() : '',
-    amount: m ? m[3].replace(/\./g, '') : '',
-    date: date,
-    originBank: originBank,
-  };
+  let rows = servipagDetalleHtml(html);
+  if (!rows.length) rows = servipagDetalleTexto(base);
+
+  return rows.map(function (r) {
+    return {
+      kind: 'pago_servicio',
+      empresa: r.empresa,
+      identificador: r.identificador,
+      amount: r.amount,
+      date: date,
+      originBank: originBank,
+      originLast4: originLast4,
+    };
+  });
+}
+
+// Detalle desde el HTML: filas <tr> con 5 celdas <td> (Empresa | Nombre | Identificador de
+// cuenta | Valor | Código autorización). Las celdas de encabezado son <th>, así que no entran.
+// Robusto a celdas con enlaces, a la columna "Nombre" vacía y a nombres largos que en texto
+// plano se parten en dos líneas.
+function servipagDetalleHtml(html) {
+  const src = String(html || '');
+  const iDet = src.search(/Detalle\s+de\s+pago/i);
+  if (iDet < 0) return [];
+  const blk = src.slice(iDet);
+  const rows = [];
+  const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let tr;
+  while ((tr = trRe.exec(blk)) !== null) {
+    const cells = [];
+    const tdRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+    let td;
+    while ((td = tdRe.exec(tr[1])) !== null) cells.push(stripHtml(td[1]).trim());
+    if (cells.length < 4) continue;
+    const identificador = cells[2].replace(/\D/g, '');
+    const amount = cells[3].replace(/\D/g, '');
+    if (!identificador || !amount) continue;
+    rows.push({ empresa: cells[0].replace(/\s+/g, ' ').trim(), identificador: identificador, amount: amount });
+  }
+  return rows;
+}
+
+// Respaldo en texto plano. Cada fila termina en "<identificador> $ <valor>"; se limpian los
+// "<#>" que getPlainBody deja en lugar de los enlaces y se recorre el bloque con /g.
+function servipagDetalleTexto(txt) {
+  const iDet = String(txt || '').search(/Detalle\s+de\s+pago/i);
+  if (iDet < 0) return [];
+  const blk = txt.slice(iDet).replace(/<#>/g, ' ');
+  const rows = [];
+  const re = /([^\n$]+?)\s+(\d{5,})\s*\$\s*([\d.,]+)/g;
+  let m;
+  while ((m = re.exec(blk)) !== null) {
+    rows.push({
+      empresa: m[1].replace(/\s+/g, ' ').trim(),
+      identificador: m[2],
+      amount: m[3].replace(/\./g, ''),
+    });
+  }
+  return rows;
+}
+
+// El comprobante de Servipag dice CON QUÉ BANCO se pagó, pero no con qué cuenta — y un banco
+// puede tener varias (el Chile tiene Cta. Cte. ****7004 y Línea de Crédito ****7005). El aviso
+// "Cargo en Cuenta" que manda el mismo banco sí trae la cuenta enmascarada:
+//   "se ha realizado una compra por $66.820 con cargo a Cuenta ****7004 en Servipag el 08/08/2026 14:16."
+// Se busca el aviso que calce en monto TOTAL + fecha y se devuelven esos 4 dígitos.
+// OJO: este correo NO se ingesta como movimiento (duplicaría el gasto que ya trae el
+// comprobante de Servipag) — se lee solo como dato de apoyo, por eso queda fuera de SEARCH.
+function buscarCargoEnCuenta(totalDigits, fechaDDMMYYYY) {
+  if (!totalDigits) return '';
+  let last4 = '';
+  try {
+    const threads = GmailApp.search('from:bancochile.cl subject:"Cargo en Cuenta" newer_than:3d', 0, 20);
+    threads.forEach(function (t) {
+      if (last4) return;
+      t.getMessages().forEach(function (m) {
+        if (last4) return;
+        const body = stripHtml(m.getPlainBody() || m.getBody());
+        const hit = body.match(/por\s*\$\s*([\d.,]+)\s+con\s+cargo\s+a\s+Cuenta\s+\**(\d{4})[\s\S]{0,120}?(\d{1,2}\/\d{1,2}\/\d{4})/i);
+        if (!hit) return;
+        if (hit[1].replace(/\D/g, '') !== totalDigits) return;
+        if (fechaDDMMYYYY && hit[3] !== fechaDDMMYYYY) return;
+        last4 = hit[2];
+      });
+    });
+  } catch (e) {
+    // Si Gmail falla acá no se pierde el pago: transfer-ingest cae al match por nombre de banco.
+    Logger.log('buscarCargoEnCuenta falló: ' + e);
+  }
+  return last4;
+}
+
+// Limpieza compartida de HTML -> texto (tags, entidades, espacios).
+function stripHtml(s) {
+  return String(s || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&')
+    .replace(/&aacute;/gi, 'á').replace(/&eacute;/gi, 'é').replace(/&iacute;/gi, 'í')
+    .replace(/&oacute;/gi, 'ó').replace(/&uacute;/gi, 'ú').replace(/&ntilde;/gi, 'ñ')
+    .replace(/&deg;/gi, '°').replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, ' ');
 }
 
 // ── MetLife (pago de dividendo hipotecario) ─────────────────

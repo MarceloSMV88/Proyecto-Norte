@@ -17,11 +17,11 @@ const digits = (s: unknown) => String(s ?? '').replace(/\D/g, '')
 // Los bancos escriben la misma cuenta con o sin ceros a la izquierda (00-407-01867-01 vs 4070186701)
 const acctKey = (d: string) => d.replace(/^0+/, '')
 function normBank(s: unknown): string {
-  return String(s ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\b(banco|de|del|la|el|cuenta|corriente|vista|ahorro|cl|sa|s\.a\.)\b/g, '').replace(/[^a-z0-9]/g, '')
 }
 function nameTokens(s: unknown): string[] {
-  return String(s ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(t => t.length >= 3)
 }
 function chileDate(d: Date): string {
@@ -38,7 +38,7 @@ function tokens(desc: string) {
   return { oa: g('oa'), da: g('da'), ob: g('ob'), db: g('db'), tx: g('tx') }
 }
 function nameTokensLoose(s: unknown): string[] {
-  return String(s ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(t => t.length >= 3)
 }
 
@@ -233,7 +233,7 @@ Deno.serve(async (req) => {
     // Cuenta de cargo: por número (tolerante a ceros a la izquierda) y, si no hay número
     // (ej. Servipag solo indica el banco, no la cuenta), por nombre de banco — prefiriendo
     // cuenta de depósito sobre TC si el banco tiene ambas.
-    const { data: accts } = await sb.from('accounts').select('id, account_number, bank, name, type').eq('profile_id', profileId)
+    const { data: accts } = await sb.from('accounts').select('id, account_number, bank, name, type, last4').eq('profile_id', profileId)
     const k = acctKey(digits(b.originAccount))
     let acc = k ? ((accts ?? []).find(a => a.account_number && acctKey(digits(a.account_number)) === k) ?? null) : null
     // Respaldo: una Cuenta RUT a veces viene con el dígito verificador (lo manda el banco de
@@ -246,6 +246,25 @@ Deno.serve(async (req) => {
         const ak = acctKey(digits(a.account_number))
         return ak.length > 1 && k.length > 1 && (ak.slice(0, -1) === k || ak === k.slice(0, -1))
       }) ?? null
+    }
+    // Respaldo por ÚLTIMOS 4 DÍGITOS. Servipag solo dice el nombre del banco, pero el aviso
+    // "Cargo en Cuenta" que manda el mismo banco trae la cuenta enmascarada (****7004) — el
+    // .gs lo busca y lo manda acá como originLast4. Sin esto habría que adivinar cuál de las
+    // cuentas de ese banco pagó (el Chile tiene Cta. Cte. ****7004 y Línea de Crédito ****7005).
+    if (!acc) {
+      const l4 = digits(b.originLast4).slice(-4)
+      if (l4.length === 4) {
+        const bankN = normBank(b.originBank)
+        const hits = (accts ?? []).filter(a => {
+          const an = digits(a.account_number)
+          return (an.length >= 4 && an.slice(-4) === l4) || digits(a.last4) === l4
+        })
+        const sameBank = bankN.length >= 3
+          ? hits.filter(a => { const ab = normBank(a.bank), an = normBank(a.name); return ab.includes(bankN) || an.includes(bankN) || bankN.includes(ab) })
+          : []
+        const pool = sameBank.length ? sameBank : hits
+        acc = pool.find(a => a.type !== 'Crédito') ?? pool[0] ?? null
+      }
     }
     if (!acc) {
       const bankN = normBank(b.originBank)
