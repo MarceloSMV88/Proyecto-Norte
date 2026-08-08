@@ -44,17 +44,19 @@ const STATUS_COLOR: Record<CommitmentStatus, string> = {
   sin_gasto: 'var(--c-blue)',
 }
 
-function nextMonthStr(month: string): string {
+function addMonthsStr(month: string, delta: number): string {
   const d = new Date(month + 'T12:00:00')
-  d.setMonth(d.getMonth() + 1)
+  d.setMonth(d.getMonth() + delta)
   return d.toISOString().slice(0, 7) + '-01'
 }
 
-function prevMonthStr(month: string): string {
-  const d = new Date(month + 'T12:00:00')
-  d.setMonth(d.getMonth() - 1)
-  return d.toISOString().slice(0, 7) + '-01'
-}
+function nextMonthStr(month: string): string { return addMonthsStr(month, 1) }
+function prevMonthStr(month: string): string { return addMonthsStr(month, -1) }
+
+// Ventana de movimientos que se pueden vincular a mano a un compromiso: 2 meses hacia atrás y
+// 2 hacia adelante del mes seleccionado. Un pago no siempre cae en el mes de su compromiso
+// (se adelanta, se atrasa, o el banco lo carga recién al mes siguiente).
+const LINK_WINDOW_MONTHS = 2
 
 function dueDateFor(month: string, day: number | null): string | null {
   if (!day) return null
@@ -121,6 +123,7 @@ export default function CompromisosPage() {
   const [budgetByCategory, setBudgetByCategory] = useState<Map<string, { assigned: number; spent: number }>>(new Map())
   const [accounts, setAccounts] = useState<Account[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [claimedInWindow, setClaimedInWindow] = useState<Set<string>>(new Set())
   const [modalCommitment, setModalCommitment] = useState<MonthlyCommitment | 'new' | null>(null)
   const [filter, setFilter] = useState<CommitmentFilter>('Todos')
   const [search, setSearch] = useState('')
@@ -133,8 +136,12 @@ export default function CompromisosPage() {
   const load = useCallback(async () => {
     if (!activeProfile) return
     setTableError(null)
-    const nextMonth = nextMonthStr(selectedMonth)
-    const [cmts, cats, budgets, accs, txs] = await Promise.all([
+    // Los movimientos se traen de una ventana de ±LINK_WINDOW_MONTHS meses (no solo del mes
+    // seleccionado) para poder vincular a mano un pago que cayó en otro mes. La detección
+    // automática sigue mirando solo el mes seleccionado (ver monthTransactions).
+    const windowFrom = addMonthsStr(selectedMonth, -LINK_WINDOW_MONTHS)
+    const windowTo = addMonthsStr(selectedMonth, LINK_WINDOW_MONTHS + 1)
+    const [cmts, cats, budgets, accs, txs, claimed] = await Promise.all([
       supabase.from('monthly_commitments')
         .select('*, categories(name,icon,color,group_name), accounts(name), transactions(name,amount,date)')
         .eq('profile_id', activeProfile.id)
@@ -148,8 +155,15 @@ export default function CompromisosPage() {
       supabase.from('accounts').select('*').eq('profile_id', activeProfile.id).order('type').order('name'),
       supabase.from('transactions').select('*, categories(name,icon,color), accounts(name)')
         .eq('profile_id', activeProfile.id)
-        .gte('date', selectedMonth).lt('date', nextMonth)
-        .order('date', { ascending: false }).limit(400),
+        .gte('date', windowFrom).lt('date', windowTo)
+        .order('date', { ascending: false }).limit(600),
+      // Movimientos ya tomados por un compromiso de CUALQUIER mes de la ventana: al poder
+      // vincular entre meses, mirar solo los de este mes dejaría re-vincular el mismo
+      // movimiento a dos compromisos de meses distintos.
+      supabase.from('monthly_commitments').select('paid_transaction_id')
+        .eq('profile_id', activeProfile.id)
+        .gte('month', windowFrom).lt('month', windowTo)
+        .not('paid_transaction_id', 'is', null),
     ])
 
     if (cmts.error) {
@@ -162,25 +176,35 @@ export default function CompromisosPage() {
     setBudgetByCategory(new Map((budgets.data || []).map((b: { category_id: string; assigned: number; spent: number }) => [b.category_id, { assigned: b.assigned, spent: b.spent }])))
     setAccounts((accs.data || []) as Account[])
     setTransactions((txs.data || []) as Transaction[])
+    setClaimedInWindow(new Set((claimed.data || []).map((r: { paid_transaction_id: string }) => r.paid_transaction_id)))
   }, [activeProfile, selectedMonth, supabase])
 
   useEffect(() => { load() }, [load])
 
-  // Movimientos ya vinculados a CUALQUIER compromiso este mes: no se vuelven a sugerir
-  // (evita que dos compromisos que comparten hint/ruta -ej. Perlita y Mini- se disputen el mismo pago).
-  const claimedTxIds = useMemo(
-    () => new Set(commitments.filter(c => c.paid_transaction_id).map(c => c.paid_transaction_id as string)),
-    [commitments]
-  )
+  // Movimientos ya vinculados a CUALQUIER compromiso de la ventana: no se vuelven a sugerir ni
+  // se pueden re-elegir (evita que dos compromisos que comparten hint/ruta -ej. Perlita y Mini-
+  // se disputen el mismo pago, ahora también entre meses distintos).
+  const claimedTxIds = useMemo(() => {
+    const s = new Set(claimedInWindow)
+    commitments.forEach(c => { if (c.paid_transaction_id) s.add(c.paid_transaction_id) })
+    return s
+  }, [commitments, claimedInWindow])
+
+  // La sugerencia automática sigue acotada al mes seleccionado: proponer sola un movimiento de
+  // otro mes sería ruido. La ventana ±2 meses existe solo para vincular a mano.
+  const monthTransactions = useMemo(() => {
+    const end = nextMonthStr(selectedMonth)
+    return transactions.filter(t => t.date >= selectedMonth && t.date < end)
+  }, [transactions, selectedMonth])
 
   const enriched = useMemo(() => commitments.map(c => {
-    const detected = detectTransaction(c, transactions, claimedTxIds)
+    const detected = detectTransaction(c, monthTransactions, claimedTxIds)
     const status = effectiveStatus(c, detected)
     const paid = status === 'pagado'
       ? c.actual_amount || Math.abs(c.transactions?.amount || 0)
       : status === 'detectado' && detected ? Math.abs(detected.amount) : 0
     return { commitment: c, detected, status, paid }
-  }), [commitments, transactions, claimedTxIds])
+  }), [commitments, monthTransactions, claimedTxIds])
 
   if (!activeProfile) return null
 
@@ -306,6 +330,9 @@ export default function CompromisosPage() {
   // cubre el movimiento completo, solo se categoriza; si es menor, se separa en dos filas de
   // la MISMA cuenta (mismo total, mismo saldo) — una sin categoría con el resto y otra
   // categorizada y vinculada al compromiso.
+  // El movimiento puede ser de otro mes (ventana ±LINK_WINDOW_MONTHS): la fila nueva conserva
+  // la FECHA DEL MOVIMIENTO, no la del compromiso — el gasto pertenece al mes en que la plata
+  // salió de la cuenta, así que el presupuesto de ese mes es el que debe reflejarlo.
   async function linkPartialTransaction(commitment: MonthlyCommitment, tx: Transaction, portionStr: string) {
     if (!activeProfile) return
     const portion = parseInt(portionStr.replace(/\D/g, '')) || 0
@@ -380,7 +407,12 @@ export default function CompromisosPage() {
       expected_amount: c.expected_amount,
       due_day: c.due_day,
       payment_method: null,
-      matcher_hint: null,
+      // El matcher_hint SE ARRASTRA (antes se copiaba en null). Es el texto corto que
+      // linkCommitment (transfer-ingest) y detectTransaction buscan dentro del movimiento real
+      // — sin él caen al nombre completo del compromiso ("Perlita - Vespucio Oriente"), que
+      // nunca aparece tal cual en el texto del banco, y el auto-vínculo deja de funcionar al
+      // mes siguiente de haberlo configurado.
+      matcher_hint: c.matcher_hint,
       status: 'pendiente' as CommitmentStatus,
       actual_amount: 0,
       month: selectedMonth,
@@ -567,6 +599,7 @@ export default function CompromisosPage() {
         <SplitLinkModal
           commitment={splitFor}
           transactions={transactions}
+          month={selectedMonth}
           claimedTxIds={claimedTxIds}
           onClose={() => setSplitFor(null)}
           onConfirm={linkPartialTransaction}
@@ -576,9 +609,10 @@ export default function CompromisosPage() {
   )
 }
 
-function SplitLinkModal({ commitment, transactions, claimedTxIds, onClose, onConfirm }: {
+function SplitLinkModal({ commitment, transactions, month, claimedTxIds, onClose, onConfirm }: {
   commitment: MonthlyCommitment
   transactions: Transaction[]
+  month: string
   claimedTxIds: Set<string>
   onClose: () => void
   onConfirm: (commitment: MonthlyCommitment, tx: Transaction, portionStr: string) => void
@@ -614,19 +648,22 @@ function SplitLinkModal({ commitment, transactions, claimedTxIds, onClose, onCon
         {!selected ? (
           <>
             <p className="card-sub" style={{ marginTop: -4, marginBottom: 12 }}>
-              Elige el movimiento del que sale este pago — sirve cuando está incluido dentro de una transferencia más grande.
+              Elige el movimiento del que sale este pago — sirve cuando está incluido dentro de una transferencia más grande,
+              o cuando el pago quedó registrado en otro mes. Se muestran los movimientos sin vincular de {LINK_WINDOW_MONTHS} meses
+              hacia atrás y {LINK_WINDOW_MONTHS} hacia adelante.
             </p>
             <div style={{ position: 'relative', marginBottom: 12 }}>
               <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-faint)' }} />
               <input className="text-input" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar movimiento..." style={{ paddingLeft: 34 }} autoFocus />
             </div>
             <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {candidates.length === 0 && <p className="card-sub">Sin movimientos de gasto este mes.</p>}
+              {candidates.length === 0 && <p className="card-sub">Sin movimientos de gasto sin vincular en el rango.</p>}
               {candidates.map(tx => (
                 <button key={tx.id} type="button" onClick={() => pick(tx)}
                   style={{ display: 'flex', justifyContent: 'space-between', gap: 10, textAlign: 'left', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
                   <span>
                     <b>{tx.name}</b>
+                    {tx.date.slice(0, 7) !== month.slice(0, 7) && <span className="chip xs" style={{ marginLeft: 6 }}>otro mes</span>}
                     <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-faint)' }}>{formatDate(tx.date)}{tx.category_id ? '' : ' · sin categoría'}</span>
                   </span>
                   <span style={{ whiteSpace: 'nowrap' }}>{clp(Math.abs(tx.amount))}</span>
