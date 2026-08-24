@@ -69,6 +69,47 @@ function normalizeText(s: string): string {
   return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 }
 
+// Tokenización de matching, alineada con `nameTokensLoose` de transfer-ingest: la puntuación
+// pasa a ser espacio (así el "1951120-0" que escribe el banco y el hint "1951120" calzan) y se
+// descartan las palabras de menos de 3 letras. ANTES el front normalizaba solo mayúsculas y
+// acentos, así que un hint que la ingesta SI auto-vinculaba podía no aparecer como "detectado"
+// acá: las dos puntas tienen que reconocer lo mismo, o el hint aprendido sirve en un solo lado.
+function matchTokens(s: string): string[] {
+  return normalizeText(s).replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(t => t.length >= 3)
+}
+
+// ¿Alcanza este hint para reconocer este movimiento? Misma regla que detectTransaction y que
+// linkCommitment (transfer-ingest): TODAS las palabras del hint deben aparecer en el texto.
+function hintMatchesTx(hint: string, tx: { name: string; description?: string | null }): boolean {
+  const hintTokens = matchTokens(hint)
+  if (!hintTokens.length) return false
+  const haystack = matchTokens(`${tx.name} ${tx.description || ''}`).join(' ')
+  return hintTokens.every(t => haystack.includes(t))
+}
+
+// Palabras que aparecen en casi cualquier comprobante bancario: como hint no distinguen nada
+// y harían que el compromiso matchee cualquier gasto de su categoría.
+const HINT_STOPWORDS = new Set([
+  'pago', 'pagos', 'pagado', 'compra', 'transferencia', 'transferencias', 'cargo', 'abono',
+  'cuenta', 'cuentas', 'cliente', 'clientes', 'numero', 'banco',
+  'spa', 'ltda', 'limitada', 'sociedad', 'anonima',
+])
+
+// Deriva un matcher_hint desde el TEXTO REAL DEL BANCO de un movimiento que el usuario vinculó
+// a mano: es el "aprendizaje". La próxima vez el compromiso se reconoce solo, sin depender de
+// que el apodo ("Luz", "Cel") coincida con lo que escribe el banco (Enel, Entel pcs).
+// Se queda con las 2 primeras palabras distintivas porque el matcher exige que TODAS aparezcan:
+// más palabras = más estricto = más chance de fallar el mes siguiente.
+// Los números se filtran por largo: 6+ dígitos suele ser N° de cliente/servicio (estable y muy
+// distintivo, ej. "1951120"); menos que eso suele ser un monto o una fecha, que cambian.
+function deriveMatcherHint(txName: string, txDesc?: string | null): string | null {
+  const tokens = matchTokens(`${txName} ${txDesc || ''}`)
+    .filter(t => !HINT_STOPWORDS.has(t))
+    .filter(t => !/^\d+$/.test(t) || t.length >= 6)
+  if (!tokens.length) return null
+  return tokens.slice(0, 2).join(' ')
+}
+
 function supabaseErrorMessage(error: unknown): string {
   if (!error) return 'Supabase no entregó detalle del error.'
   if (typeof error === 'string') return error
@@ -83,8 +124,7 @@ function supabaseErrorMessage(error: unknown): string {
 
 function detectTransaction(commitment: MonthlyCommitment, transactions: Transaction[], claimedTxIds: Set<string>) {
   if (commitment.paid_transaction_id) return null
-  const hint = normalizeText(commitment.matcher_hint || commitment.name)
-  const hintTokens = hint.split(/\s+/).filter(t => t.length >= 3)
+  const hintTokens = matchTokens(commitment.matcher_hint || commitment.name)
 
   return transactions.find(tx => {
     // Un movimiento ya confirmado en OTRO compromiso no puede sugerirse de nuevo
@@ -97,7 +137,7 @@ function detectTransaction(commitment: MonthlyCommitment, transactions: Transact
       || Math.abs(abs - commitment.expected_amount) <= Math.max(500, commitment.expected_amount * 0.18)
     if (!amountOk) return false
     if (!hintTokens.length) return true
-    const txName = normalizeText(`${tx.name} ${tx.description || ''}`)
+    const txName = matchTokens(`${tx.name} ${tx.description || ''}`).join(' ')
     // TODAS las palabras del hint deben aparecer (no basta una) — evita que "norte" o
     // "autopista" (comunes a varias rutas/servicios) matcheen el compromiso equivocado.
     return hintTokens.every(token => txName.includes(token))
@@ -236,6 +276,34 @@ export default function CompromisosPage() {
     return acc
   }, {})
 
+  // Auto-aprendizaje del matcher_hint. Si el usuario tuvo que vincular a mano es porque el
+  // hint actual no reconoce como escribe el banco ese cobro, así que guardamos uno derivado
+  // del movimiento real y el mes que viene entra solo. Reglas:
+  //   - No pisa un hint que SI matchea el movimiento: ese lo puso el usuario y funciona.
+  //   - Lo propaga a los meses FUTUROS ya creados que sigan sin hint. Los compromisos son una
+  //     fila por mes: sin esto, aprender en agosto no sirve para el septiembre ya copiado.
+  async function learnMatcherHint(commitment: MonthlyCommitment, tx: Transaction) {
+    if (!activeProfile) return
+    const current = commitment.matcher_hint?.trim() || ''
+    if (current && hintMatchesTx(current, tx)) return
+    // Sin hint, el matcher cae al NOMBRE del compromiso. Si ese nombre ya reconoce el
+    // movimiento, la detección funciona y escribir un hint solo agrega ruido (y puede
+    // empeorarla): "Gas 98009821" ya calza con "Gasco glp s.a. / N° cliente 98009821".
+    if (!current && hintMatchesTx(commitment.name, tx)) return
+    const learned = deriveMatcherHint(tx.name, tx.description)
+    if (!learned || learned === current) return
+
+    await supabase.from('monthly_commitments')
+      .update({ matcher_hint: learned }).eq('id', commitment.id)
+    await supabase.from('monthly_commitments')
+      .update({ matcher_hint: learned })
+      .eq('profile_id', activeProfile.id)
+      .eq('name', commitment.name)
+      .eq('category_id', commitment.category_id)
+      .gt('month', commitment.month)
+      .is('matcher_hint', null)
+  }
+
   async function confirmDetected(commitment: MonthlyCommitment, tx: Transaction) {
     const { error } = await supabase.from('monthly_commitments').update({
       status: 'pagado',
@@ -243,6 +311,7 @@ export default function CompromisosPage() {
       actual_amount: Math.abs(tx.amount),
     }).eq('id', commitment.id)
     if (error) { showToast('Error al vincular movimiento'); return }
+    await learnMatcherHint(commitment, tx)
     showToast('Movimiento vinculado al compromiso')
     load()
   }
@@ -345,6 +414,7 @@ export default function CompromisosPage() {
       await supabase.from('monthly_commitments').update({
         status: 'pagado' as CommitmentStatus, actual_amount: portion, paid_transaction_id: tx.id,
       }).eq('id', commitment.id)
+      await learnMatcherHint(commitment, tx)
       showToast('Movimiento vinculado al compromiso')
       setSplitFor(null)
       load()
@@ -368,6 +438,9 @@ export default function CompromisosPage() {
     await supabase.from('monthly_commitments').update({
       status: 'pagado' as CommitmentStatus, actual_amount: portion, paid_transaction_id: newTx.id,
     }).eq('id', commitment.id)
+    // Del ORIGINAL, no del sintético: newTx lleva `name: commitment.name` (el apodo del
+    // usuario), aprender de ahi seria circular y no enseñaría nada del texto del banco.
+    await learnMatcherHint(commitment, tx)
     showToast('Movimiento separado y vinculado')
     setSplitFor(null)
     load()
@@ -727,6 +800,7 @@ function CommitmentModal({ profileId, month, categories, budgetByCategory, accou
   const [expected, setExpected] = useState(commitment ? String(commitment.expected_amount) : '')
   const [dueDay, setDueDay] = useState(commitment?.due_day ? String(commitment.due_day) : '')
   const [status, setStatus] = useState<CommitmentStatus>(commitment?.status ?? 'pendiente')
+  const [hint, setHint] = useState(commitment?.matcher_hint ?? '')
   const [saving, setSaving] = useState(false)
 
   const amountN = parseInt(expected.replace(/\D/g, '')) || 0
@@ -747,7 +821,10 @@ function CommitmentModal({ profileId, month, categories, budgetByCategory, accou
       expected_amount: amountN,
       due_day: dueN,
       payment_method: null,
-      matcher_hint: null,
+      // Va el valor del campo, NO null fijo: este payload se usa para insert Y para update,
+      // así que hardcodear null borraba el hint aprendido cada vez que se editaba cualquier
+      // otro dato del compromiso (monto, dia, cuenta), que es justo lo contrario de aprender.
+      matcher_hint: hint.trim() || null,
       status,
       month,
     }
@@ -817,6 +894,14 @@ function CommitmentModal({ profileId, month, categories, budgetByCategory, accou
           <div className="amount-field" style={{ marginBottom: 0 }}>
             <span className="amount-cur">$</span>
             <input className="amount-input" inputMode="numeric" value={amountN > 0 ? amountN.toLocaleString('es-CL') : ''} onChange={e => setExpected(e.target.value.replace(/\D/g, ''))} placeholder="0" />
+          </div>
+
+          <label className="field-label">Cómo lo escribe el banco</label>
+          <input className="text-input" value={hint} onChange={e => setHint(e.target.value)}
+            placeholder="Se aprende solo al vincular un pago" maxLength={56} />
+          <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 6 }}>
+            Palabras que deben aparecer TODAS en el movimiento para reconocerlo (ej. &quot;gasco&quot; o el
+            N&deg; de cliente). Vacío: se usa el nombre del compromiso.
           </div>
 
           <div className="row-2">
