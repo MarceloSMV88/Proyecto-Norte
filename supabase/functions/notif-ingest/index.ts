@@ -75,6 +75,14 @@ type Parsed =
       dateStr: string | null
       timeStr: string | null // hh:mm:ss de la notificación — distingue transferencias del mismo monto el mismo día
     }
+  | {
+      parser: string
+      kind: 'trf_interna'
+      amt: number
+      originBankHint: string // banco de la cuenta que envía (siempre tuya: es un traspaso propio)
+      destBankHint: string   // banco/app dueño de la app que notificó (destino del dinero, siempre tuya)
+      dateStr: string | null
+    }
 
 type ParserFn = (title: string, text: string) => Parsed | null
 
@@ -142,6 +150,20 @@ const parsers: ParserFn[] = [
     const dateStr = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
     const amt = parseInt(m[6].replace(/[^0-9]/g, ''), 10)
     return { parser: 'santander_trf_recibida', kind: 'trf_recibida_cuenta', amt, destAccount: m[5], dateStr, timeStr: m[4] }
+  },
+  // Mercado Pago — dinero recibido en la billetera desde una cuenta bancaria propia (traspaso
+  // interno). título: "Tu dinero ya está disponible"
+  // cuerpo: "Transferiste $ 58.180 desde tu cuenta de Banco Ripley."
+  // Siempre es un traspaso entre cuentas propias: Mercado Pago solo redacta este mensaje para
+  // el vinculado que TÚ enviaste desde tu propia cuenta bancaria hacia tu propia billetera.
+  // Encontrado 2026-08-16: dos transferencias Ripley -> MercadoPago ($58.180 y $50.000) nunca
+  // se ingirieron por falta de este parser (Ripley no manda mail, a diferencia de Santander/Chile).
+  (title, text) => {
+    const m = text.match(/Transferiste\s*\$\s*([\d.,]+)\s+desde\s+tu\s+cuenta\s+de\s+(.+?)\.?\s*$/i)
+    if (!m) return null
+    const amt = parseInt(m[1].replace(/[^0-9]/g, ''), 10)
+    const originBankHint = normBank(m[2].trim())
+    return { parser: 'mercadopago_recibido_interno', kind: 'trf_interna', amt, originBankHint, destBankHint: 'mercadopago', dateStr: null }
   },
 ]
 
@@ -231,6 +253,42 @@ Deno.serve(async (req) => {
     if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
 
     return json({ ok: true, inserted: true, parser: parsed.parser, kind: 'pago_tc', legs: (ins ?? []).length, amount: amt, card_matched: !!card, origin_matched: !!origin, date: dateStr })
+  }
+
+  // === Rama TRASPASO INTERNO (Mercado Pago avisando dinero recibido desde una cuenta propia) ===
+  // Traspaso 100% entre cuentas propias, 2 patas type 'transfer'. Dedup contra CUALQUIER fuente
+  // (incluye gmail_transfer): un banco que sí manda mail para este mismo traspaso (ej. Santander)
+  // ya insertó ambas patas por ese pipeline — esta notificación de Mercado Pago llegaría después
+  // y no debe duplicar la pata destino.
+  if (parsed.kind === 'trf_interna') {
+    const { amt, originBankHint, destBankHint } = parsed
+
+    const { data: prof } = await sb.from('profiles').select('id').eq('role', 'Admin').limit(1).single()
+    if (!prof) return json({ error: 'no_profile' }, 500)
+    const profileId = prof.id as string
+
+    const { data: accts } = await sb.from('accounts').select('id, bank, name, type').eq('profile_id', profileId)
+    const findAcc = (hint: string) => (accts ?? []).find(a =>
+      a.type !== 'Crédito' && (normBank(a.bank).includes(hint) || normBank(a.name).includes(hint))
+    ) ?? null
+    const origin = findAcc(originBankHint)
+    const dest = findAcc(destBankHint)
+
+    if (dest) {
+      const { data: dup } = await sb.from('transactions').select('id')
+        .eq('profile_id', profileId).eq('account_id', dest.id).eq('amount', amt).eq('date', dateStr).limit(1)
+      if (dup && dup.length > 0) return json({ ok: true, inserted: false, reason: 'duplicate' })
+    }
+
+    const rows: Record<string, unknown>[] = []
+    if (origin) rows.push({ profile_id: profileId, name: `Transferencia a ${dest?.name ?? 'MercadoPago'}`, amount: -amt, type: 'transfer', category_id: null, account_id: origin.id, description: dest ? `hacia ${dest.name}` : null, source: 'bank_app', date: dateStr })
+    if (dest) rows.push({ profile_id: profileId, name: `Transferencia desde ${origin?.name ?? originBankHint}`, amount: amt, type: 'transfer', category_id: null, account_id: dest.id, description: origin ? `desde ${origin.name}` : null, source: 'bank_app', date: dateStr })
+    if (rows.length === 0) return json({ ok: false, reason: 'no_accounts' })
+
+    const { data: ins, error: insErr } = await sb.from('transactions').insert(rows).select('id')
+    if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
+
+    return json({ ok: true, inserted: true, parser: parsed.parser, kind: 'trf_interna', legs: (ins ?? []).length, amount: amt, origin_matched: !!origin, dest_matched: !!dest, date: dateStr })
   }
 
   // === Rama TRANSFERENCIA RECIBIDA (notificación del banco destino) ===

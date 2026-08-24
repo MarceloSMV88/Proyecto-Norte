@@ -22,7 +22,8 @@ const SEARCH   = '((from:santander.cl OR from:bancochile.cl OR from:bancoripley.
                + 'OR (from:metlife.cl subject:(dividendo)) '
                + 'OR (from:transaccionalcoopeuch.com subject:(Cuotas)) '
                + 'OR (from:bancoestado.cl subject:(Comprobante OR Transferencias)) '
-               + 'OR (from:indexa.cl subject:("Aviso de Pagos"))';
+               + 'OR (from:indexa.cl subject:("Aviso de Pagos")) '
+               + 'OR (from:colmena.cl subject:(ABONO OR REEMBOLSO))';
 
 // Gate por MARCA DE TIEMPO (no por etiqueta de hilo). Santander agrupa TODAS las
 // transferencias en un mismo hilo (mismo asunto "Comprobante Transferencia de fondos"); si
@@ -78,6 +79,7 @@ function procesarTransferencias() {
       // indexa.cl manda HTML puro (iso-8859-1, sin parte text/plain): getPlainBody() puede
       // venir vacío -> fallback al HTML crudo (el parser limpia tags/entidades él mismo).
       else if (from.indexOf('indexa') > -1)      data = parseAssetplanPago(body && body.trim() ? body : msg.getBody());
+      else if (from.indexOf('colmena') > -1)     data = parseColmenaReembolso(body, msg.getDate());
       if (!data) return;
 
       // Un parser puede devolver varios items (ej: "Comprobante de pago" con N cuentas pagadas)
@@ -561,6 +563,27 @@ function parseAssetplanPago(raw) {
     destBank:    g(/cuenta\s+[\d.\-]+\s+de\s+(Banco\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+|[A-Za-zÁÉÍÓÚÑáéíóúñ]+)/i, txt) || 'Santander',
     destMine:    true,
     comment:     'Arriendo Assetplan',
+  };
+}
+
+// ── Colmena (reembolso Isapre, abono directo a la cta cte registrada) ──────
+// Remitente TRANSFERENCIAS@colmena.cl, asunto "COLMENA ABONO CTACTE REEMBOLSO WEB Y USO
+// EXCEDENTE". Cuerpo de un párrafo: "... solicitamos a tu banco realizar el deposito en la
+// cuenta registrada por un monto de $ 99.092 . El pago estará disponible ... en un máximo de
+// 48 horas." No trae número de cuenta destino ni fecha de acreditación real (por eso se usa
+// la fecha del correo) — se asume siempre la Cta Cte Santander (000062610654), única cuenta
+// que Colmena tiene registrada. Encontrado 2026-08-16: un reembolso de $99.092 del 13-08 nunca
+// se ingestó (colmena.cl no estaba en SEARCH) y descuadró el saldo hasta que se detectó a mano.
+function parseColmenaReembolso(txt, msgDate) {
+  const amount = money(txt, /monto\s+de\s*\$\s*([\d.,]+)/i);
+  const d = msgDate;
+  const date = d ? (d.getDate() + '/' + (d.getMonth() + 1) + '/' + d.getFullYear()) : '';
+  return {
+    amount, date,
+    originName:  'Isapre Colmena',
+    destAccount: '000062610654',
+    destMine:    true,
+    comment:     'Reembolso Colmena',
   };
 }
 
