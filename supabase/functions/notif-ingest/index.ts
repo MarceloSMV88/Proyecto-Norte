@@ -129,10 +129,15 @@ const parsers: ParserFn[] = [
   // Banco Santander — compra con Tarjeta de Crédito.
   // cuerpo: "Transacción por $ 1.790. se realizó una compra con tu Tarjeta de Crédito
   // ****1147 en SERVICIOS Y COMERCIAL, el 01-07-2026 a las 16:38:41."
+  // Santander mete un calificativo opcional entre "compra" y "con tu": "una compra ONLINE con
+  // tu Tarjeta...". Sin tolerarlo se caían todas las compras por internet (2026-08-23: 3 en
+  // ingest_failures — MERPAGO*MCDONALDS 15/07, COPEC APP 01/08 y 20/08 — las tres cargadas a
+  // mano por el usuario). Se acepta UNA palabra suelta ahí para cubrir también variantes que
+  // todavía no vimos (internacional, presencial, ...) sin abrir el resto del patron.
   // Ojo: el número enmascarado que muestra esta notificación (ej. 1147) no siempre coincide
   // con el last4 real guardado en la cuenta (ej. 2838) — por eso lleva bankHint como respaldo.
   (title, text) => {
-    const m = text.match(/Transacci[oó]n por\s*\$\s*([\d.,]+)\.?\s+se realiz[oó] una compra con tu Tarjeta de Cr[eé]dito\s*\**(\d{3,4})\s+en\s+(.+?),\s+el\s+(\d{1,2})-(\d{1,2})-(\d{4})/i)
+    const m = text.match(/Transacci[oó]n por\s*\$\s*([\d.,]+)\.?\s+se realiz[oó] una compra(?:\s+[a-z]+)?\s+con tu Tarjeta de Cr[eé]dito\s*\**(\d{3,4})\s+en\s+(.+?),\s+el\s+(\d{1,2})-(\d{1,2})-(\d{4})/i)
     if (!m) return null
     const amt = parseInt(m[1].replace(/[^0-9]/g, ''), 10)
     const merchant = m[3].replace(/\s+/g, ' ').trim()
