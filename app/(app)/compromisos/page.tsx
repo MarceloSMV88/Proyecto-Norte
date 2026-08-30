@@ -134,6 +134,11 @@ function supabaseErrorMessage(error: unknown): string {
 
 function detectTransaction(commitment: MonthlyCommitment, transactions: Transaction[], claimedTxIds: Set<string>) {
   if (commitment.paid_transaction_id) return null
+  // Un compromiso que el usuario YA resolvió no recibe sugerencias, igual que en linkCommitment
+  // (transfer-ingest). 'sin_gasto' sobre todo: además de ser una decisión explícita ("este mes no
+  // tuvo costo"), sin este guard startEditReal precargaba el monto del movimiento detectado en
+  // vez de "0" al reabrir el valor real — justo lo que ese código dice querer evitar.
+  if (commitment.status === 'pagado' || commitment.status === 'omitido' || commitment.status === 'sin_gasto') return null
   const hintTokens = matchTokens(commitment.matcher_hint || commitment.name)
 
   return transactions.find(tx => {

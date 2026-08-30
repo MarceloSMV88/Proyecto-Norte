@@ -64,9 +64,17 @@ function nextMonthStr(month: string): string {
 // Regla nueva, por IDENTIDAD de compromiso (mismo nombre): si la instancia del mes del pago ya
 // está tomada, el candidato pasa a ser la instancia del mes SIGUIENTE. Son cuentas mensuales y
 // se pagan una vez al mes, así que un segundo pago que matchea lo mismo es del mes que viene.
-// Con esto Perlita (pagado en agosto) vuelve a competir desde septiembre contra Mini (libre en
-// agosto): dos candidatos, ambigüedad, no se vincula. Es a propósito — un pago sin vincular se
-// ve en la pantalla, uno vinculado al compromiso equivocado no.
+// SIN_GASTO (2026-08-30): poner $0 a mano es una decisión explícita del usuario — "esta cuenta
+// no tuvo costo este mes" — así que ese compromiso sale de la disputa por el pago, y tampoco se
+// corre al mes siguiente. Antes 'sin_gasto' pasaba el filtro, y ESA fue la causa raíz del
+// vínculo equivocado del 29/08: el usuario marca en $0 todas las autopistas del Mini todos los
+// meses, Perlita quedó excluido por pagado, y el Mini en sin_gasto sobrevivió como único
+// candidato y se llevó el pago de Perlita.
+//
+// Las dos reglas juntas resuelven el par ambiguo sin intervención: Perlita (pagado en agosto) se
+// corre a septiembre, Mini (sin_gasto) sale de la disputa, y queda un único candidato.
+// Si en cambio el gemelo estuviera en 'pendiente', quedarían dos candidatos y no se vincula: un
+// pago sin vincular se ve en la pantalla, uno vinculado al compromiso equivocado no.
 //
 // Solo se corre UN mes y solo si la instancia del mes del pago existe y está tomada: si no hay
 // compromiso ese mes, el pago no le corresponde y no se especula con el siguiente.
@@ -89,9 +97,9 @@ async function linkCommitment(
     return hintTokens.length > 0 && hintTokens.every(t => haystack.includes(t))
   })
 
-  // Libre = ni confirmado ni descartado. 'sin_gasto' sigue contando como libre (igual que antes).
+  // Libre = el usuario todavía no resolvió ese mes, en ningún sentido.
   const isFree = (c: { status: string; paid_transaction_id: string | null }) =>
-    !c.paid_transaction_id && c.status !== 'pagado' && c.status !== 'omitido'
+    !c.paid_transaction_id && c.status !== 'pagado' && c.status !== 'omitido' && c.status !== 'sin_gasto'
 
   const byName = new Map<string, typeof hits>()
   for (const c of hits) byName.set(c.name, [...(byName.get(c.name) ?? []), c])
@@ -100,6 +108,9 @@ async function linkCommitment(
   for (const group of byName.values()) {
     const cur = group.find(c => c.month === month)
     if (!cur) continue
+    // sin_gasto NO se corre al mes siguiente: el usuario ya dijo que esta cuenta no corre, así
+    // que la identidad entera sale de la disputa por este pago.
+    if (cur.status === 'sin_gasto') continue
     if (isFree(cur)) { candidates.push(cur); continue }
     const nxt = group.find(c => c.month === next)
     if (nxt && isFree(nxt)) candidates.push(nxt)
