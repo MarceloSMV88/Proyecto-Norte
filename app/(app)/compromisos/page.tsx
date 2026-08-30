@@ -98,16 +98,26 @@ const HINT_STOPWORDS = new Set([
 // Deriva un matcher_hint desde el TEXTO REAL DEL BANCO de un movimiento que el usuario vinculó
 // a mano: es el "aprendizaje". La próxima vez el compromiso se reconoce solo, sin depender de
 // que el apodo ("Luz", "Cel") coincida con lo que escribe el banco (Enel, Entel pcs).
-// Se queda con las 2 primeras palabras distintivas porque el matcher exige que TODAS aparezcan:
-// más palabras = más estricto = más chance de fallar el mes siguiente.
-// Los números se filtran por largo: 6+ dígitos suele ser N° de cliente/servicio (estable y muy
-// distintivo, ej. "1951120"); menos que eso suele ser un monto o una fecha, que cambian.
+// Toma hasta 2 palabras + el N° de cliente si el movimiento lo trae. Los números se filtran por
+// largo: 6+ dígitos suele ser N° de cliente/servicio (estable y muy distintivo, ej. "1951120");
+// menos que eso suele ser un monto o una fecha, que cambian.
+//
+// El N° de cliente va SIEMPRE que exista, ADEMÁS de las palabras — no en lugar de ellas.
+// Corregido 2026-08-29 tras un vínculo equivocado en producción: antes se tomaban "las 2 primeras
+// palabras distintivas" y el número quedaba fuera cuando el proveedor ya ocupaba dos ("Aguas
+// andinas" -> hint "aguas andinas"). Ese hint matchea CUALQUIER boleta de esa empresa, y el
+// usuario tiene 3 cuentas de agua y 4 de luz: justo el N° de cliente es lo único que las
+// distingue. Con Enel funcionaba de casualidad, porque "Enel" es una sola palabra y el número
+// entraba como segunda. Sumarlo en vez de reemplazar deja el hint MÁS estricto (el matcher exige
+// que aparezcan todas), y de este lado conviene equivocarse por no vincular antes que por
+// vincular mal: un pago sin vincular se ve, uno vinculado al compromiso equivocado no.
 function deriveMatcherHint(txName: string, txDesc?: string | null): string | null {
-  const tokens = matchTokens(`${txName} ${txDesc || ''}`)
-    .filter(t => !HINT_STOPWORDS.has(t))
-    .filter(t => !/^\d+$/.test(t) || t.length >= 6)
-  if (!tokens.length) return null
-  return tokens.slice(0, 2).join(' ')
+  const tokens = matchTokens(`${txName} ${txDesc || ''}`).filter(t => !HINT_STOPWORDS.has(t))
+  const words = tokens.filter(t => !/^\d+$/.test(t)).slice(0, 2)
+  const clientId = tokens.find(t => /^\d{6,}$/.test(t))
+  const parts = clientId ? [...words, clientId] : words
+  if (!parts.length) return null
+  return parts.join(' ')
 }
 
 function supabaseErrorMessage(error: unknown): string {
