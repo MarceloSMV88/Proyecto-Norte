@@ -42,32 +42,73 @@ function nameTokensLoose(s: unknown): string[] {
     .replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(t => t.length >= 3)
 }
 
+function nextMonthStr(month: string): string {
+  const y = Number(month.slice(0, 4))
+  const m = Number(month.slice(5, 7))
+  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`
+}
+
 // Vincula automáticamente un movimiento recién insertado a un compromiso mensual
 // (monthly_commitments) cuando hay EXACTAMENTE UN candidato sin ambigüedad — mismo perfil,
-// mes, categoría, sin confirmar aún, y cuyo matcher_hint (o nombre) aparece COMPLETO en el
-// texto del movimiento. Si hay 0 o >1 candidatos, no hace nada (queda para la sugerencia
+// categoría, sin confirmar aún, y cuyo matcher_hint (o nombre) aparece COMPLETO en el texto
+// del movimiento. Si hay 0 o >1 candidatos, no hace nada (queda para la sugerencia
 // 'detectado' del lado del cliente, que el usuario confirma a mano).
+//
+// MES (corregido 2026-08-29): antes miraba SOLO el mes de la fecha de pago. Pero el usuario
+// paga por multipago cuentas que vencen el mes siguiente (29/08 pagó boletas con vencimiento
+// 04-10/09), y ahí el compromiso de ese mes YA estaba pagado con la boleta anterior. Pasaban
+// dos cosas malas: las cuentas sin gemelo quedaban sin vincular en silencio, y las que tienen
+// gemelo (Perlita/Mini comparten hint) se enganchaban al gemelo equivocado — al quedar el
+// pagado excluido del filtro, el otro sobrevivía solo y parecía un match inequívoco.
+//
+// Regla nueva, por IDENTIDAD de compromiso (mismo nombre): si la instancia del mes del pago ya
+// está tomada, el candidato pasa a ser la instancia del mes SIGUIENTE. Son cuentas mensuales y
+// se pagan una vez al mes, así que un segundo pago que matchea lo mismo es del mes que viene.
+// Con esto Perlita (pagado en agosto) vuelve a competir desde septiembre contra Mini (libre en
+// agosto): dos candidatos, ambigüedad, no se vincula. Es a propósito — un pago sin vincular se
+// ve en la pantalla, uno vinculado al compromiso equivocado no.
+//
+// Solo se corre UN mes y solo si la instancia del mes del pago existe y está tomada: si no hay
+// compromiso ese mes, el pago no le corresponde y no se especula con el siguiente.
 async function linkCommitment(
   sb: ReturnType<typeof createClient>, profileId: string, categoryId: string | null,
   txId: string, txName: string, txDesc: string, amount: number, dateStr: string,
 ) {
   if (!categoryId) return
   const month = dateStr.slice(0, 7) + '-01'
-  const { data: cands } = await sb.from('monthly_commitments')
-    .select('id, name, matcher_hint')
-    .eq('profile_id', profileId).eq('month', month).eq('category_id', categoryId)
-    .is('paid_transaction_id', null)
-    .not('status', 'in', '(pagado,omitido)')
-  if (!cands || cands.length === 0) return
+  const next = nextMonthStr(month)
+  const { data: rows } = await sb.from('monthly_commitments')
+    .select('id, name, matcher_hint, month, status, paid_transaction_id')
+    .eq('profile_id', profileId).eq('category_id', categoryId)
+    .in('month', [month, next])
+  if (!rows || rows.length === 0) return
+
   const haystack = nameTokensLoose(`${txName} ${txDesc}`).join(' ')
-  const matches = cands.filter(c => {
+  const hits = rows.filter(c => {
     const hintTokens = nameTokensLoose(c.matcher_hint || c.name)
     return hintTokens.length > 0 && hintTokens.every(t => haystack.includes(t))
   })
-  if (matches.length !== 1) return
+
+  // Libre = ni confirmado ni descartado. 'sin_gasto' sigue contando como libre (igual que antes).
+  const isFree = (c: { status: string; paid_transaction_id: string | null }) =>
+    !c.paid_transaction_id && c.status !== 'pagado' && c.status !== 'omitido'
+
+  const byName = new Map<string, typeof hits>()
+  for (const c of hits) byName.set(c.name, [...(byName.get(c.name) ?? []), c])
+
+  const candidates = []
+  for (const group of byName.values()) {
+    const cur = group.find(c => c.month === month)
+    if (!cur) continue
+    if (isFree(cur)) { candidates.push(cur); continue }
+    const nxt = group.find(c => c.month === next)
+    if (nxt && isFree(nxt)) candidates.push(nxt)
+  }
+
+  if (candidates.length !== 1) return
   await sb.from('monthly_commitments').update({
     status: 'pagado', actual_amount: Math.abs(amount), paid_transaction_id: txId,
-  }).eq('id', matches[0].id)
+  }).eq('id', candidates[0].id)
 }
 
 Deno.serve(async (req) => {
