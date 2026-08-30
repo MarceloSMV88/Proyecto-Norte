@@ -710,8 +710,28 @@ function SplitLinkModal({ commitment, transactions, month, claimedTxIds, onClose
   const [selected, setSelected] = useState<Transaction | null>(null)
   const [portion, setPortion] = useState('')
 
+  // Un compromiso se salda con un movimiento que el presupuesto cuenta como gasto: la MISMA
+  // regla que sync_category_spent (migración 008) -> los gastos, y la pata POSITIVA de una
+  // transferencia (pago de tarjeta, aporte a ahorro). Antes el filtro era solo type==='gasto',
+  // así que los pagos de TC -que son transferencias de 2 patas- no aparecían NUNCA acá: había
+  // que escribir el valor real a mano, y eso crea un movimiento fantasma en vez de vincular el
+  // pago de verdad. Con la regla vieja, un compromiso pagado por transferencia solo se podía
+  // vincular si lo agarraba el auto-match de linkCommitment (que no filtra por tipo).
+  //
+  // De una transferencia se ofrece UNA sola pata: la positiva, que es la que el trigger cuenta.
+  // La negativa solo cuando no existe su positiva — el caso de una transferencia a un TERCERO,
+  // donde el destino no es cuenta tuya y Norte guarda una sola pata. Sin esto aparecerían las
+  // dos patas del mismo movimiento como filas idénticas: mismo nombre, fecha y monto absoluto.
+  const positiveLegs = new Set(
+    transactions.filter(t => t.type === 'transfer' && t.amount > 0).map(t => `${t.date}|${Math.abs(t.amount)}`)
+  )
+  const isLinkable = (t: Transaction) =>
+    t.type === 'gasto' ? t.amount < 0
+      : t.type === 'transfer' ? t.amount > 0 || !positiveLegs.has(`${t.date}|${Math.abs(t.amount)}`)
+      : false
+
   const candidates = transactions
-    .filter(t => t.type === 'gasto' && t.amount < 0)
+    .filter(isLinkable)
     .filter(t => !claimedTxIds.has(t.id))  // un movimiento ya vinculado a otro compromiso no se puede re-elegir
     .filter(t => !search || t.name.toLowerCase().includes(search.toLowerCase()))
     // Más reciente → más antiguo (created_at como desempate para movimientos del mismo día).
@@ -745,14 +765,14 @@ function SplitLinkModal({ commitment, transactions, month, claimedTxIds, onClose
               <input className="text-input" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar movimiento..." style={{ paddingLeft: 34 }} autoFocus />
             </div>
             <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {candidates.length === 0 && <p className="card-sub">Sin movimientos de gasto sin vincular en el rango.</p>}
+              {candidates.length === 0 && <p className="card-sub">Sin movimientos sin vincular en el rango.</p>}
               {candidates.map(tx => (
                 <button key={tx.id} type="button" onClick={() => pick(tx)}
                   style={{ display: 'flex', justifyContent: 'space-between', gap: 10, textAlign: 'left', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
                   <span>
                     <b>{tx.name}</b>
                     {tx.date.slice(0, 7) !== month.slice(0, 7) && <span className="chip xs" style={{ marginLeft: 6 }}>otro mes</span>}
-                    <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-faint)' }}>{formatDate(tx.date)}{tx.category_id ? '' : ' · sin categoría'}</span>
+                    <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-faint)' }}>{formatDate(tx.date)}{tx.accounts?.name ? ` · ${tx.accounts.name}` : ''}{tx.category_id ? '' : ' · sin categoría'}</span>
                   </span>
                   <span style={{ whiteSpace: 'nowrap' }}>{clp(Math.abs(tx.amount))}</span>
                 </button>
