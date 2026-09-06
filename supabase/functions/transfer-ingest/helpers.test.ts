@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { digits, acctKey, normBank, nameTokens, nameTokensLoose, normDate, tokens, nextMonthStr } from './helpers.ts'
+import { digits, acctKey, normBank, nameTokens, nameTokensLoose, normDate, tokens, nextMonthStr, isDuplicateTransferCandidate } from './helpers.ts'
 
 describe('digits', () => {
   it('deja solo los dígitos, quitando guiones', () => {
@@ -97,5 +97,96 @@ describe('nextMonthStr', () => {
 
   it('rueda el año al pasar de diciembre a enero', () => {
     expect(nextMonthStr('2026-12-01')).toBe('2027-01-01')
+  })
+})
+
+describe('isDuplicateTransferCandidate', () => {
+  const empty = { oa: '', da: '', ob: '', db: '', tx: '' }
+
+  it('mismo txnId siempre es duplicado, sin importar el resto', () => {
+    const dup = isDuplicateTransferCandidate({
+      txType: 'gasto', txnId: 'ABC123', originAcctD: '', destAcctD: '',
+      originBankN: 'chile', destBankN: 'otro',
+      candidate: { ...empty, tx: 'ABC123' },
+    })
+    expect(dup).toBe(true)
+  })
+
+  it('transfer interna: mismo par de bancos sin cuentas compartidas SÍ es duplicado', () => {
+    const dup = isDuplicateTransferCandidate({
+      txType: 'transfer', txnId: '', originAcctD: '', destAcctD: '',
+      originBankN: 'chile', destBankN: 'ripley',
+      candidate: { ...empty, ob: 'ripley', db: 'chile' }, // orden invertido, se ordena antes de comparar
+    })
+    expect(dup).toBe(true)
+  })
+
+  it('transfer interna: cuenta compartida es duplicado aunque los bancos no matcheen', () => {
+    const dup = isDuplicateTransferCandidate({
+      txType: 'transfer', txnId: '', originAcctD: '4070186701', destAcctD: '',
+      originBankN: 'chile', destBankN: 'ripley',
+      candidate: { ...empty, oa: '4070186701', ob: 'otrobanco' },
+    })
+    expect(dup).toBe(true)
+  })
+
+  it('gasto: cuenta de la contraparte coincide -> duplicado', () => {
+    const dup = isDuplicateTransferCandidate({
+      txType: 'gasto', txnId: '', originAcctD: '', destAcctD: '16798718',
+      originBankN: 'chile', destBankN: '',
+      candidate: { ...empty, da: '16798718' },
+    })
+    expect(dup).toBe(true)
+  })
+
+  it('gasto: mismo monto/fecha/origen pero cuenta de contraparte DISTINTA -> no es duplicado', () => {
+    // Este es el caso que el comentario original documentaba: tu misma cuenta paga dos gastos
+    // distintos el mismo día por el mismo monto, a terceros con cuenta conocida y diferente.
+    const dup = isDuplicateTransferCandidate({
+      txType: 'gasto', txnId: '', originAcctD: '4070186701', destAcctD: '11111111',
+      originBankN: 'chile', destBankN: 'ripley',
+      candidate: { ...empty, oa: '4070186701', da: '22222222' },
+    })
+    expect(dup).toBe(false)
+  })
+
+  it('gasto: ninguno de los 2 correos trae cuenta de la contraparte, pero coincide el par de bancos -> duplicado (regresión 2026-09-06)', () => {
+    // Pago de Internet del depto de Conchalí: 2 correos de Banco de Chile por la misma
+    // transferencia, ninguno con la cuenta del ISP -> antes nunca se detectaba como duplicado.
+    const dup = isDuplicateTransferCandidate({
+      txType: 'gasto', txnId: '', originAcctD: '', destAcctD: '',
+      originBankN: 'chile', destBankN: 'chile',
+      candidate: { ...empty, ob: 'chile', db: 'chile' },
+    })
+    expect(dup).toBe(true)
+  })
+
+  it('gasto: sin cuenta de contraparte en el nuevo, pero el existente SÍ la trae -> no se asume duplicado', () => {
+    // Si el existente ya tiene la cuenta real del tercero, no alcanza con que el par de bancos
+    // coincida (podría ser un tercero distinto con el mismo banco).
+    const dup = isDuplicateTransferCandidate({
+      txType: 'gasto', txnId: '', originAcctD: '', destAcctD: '',
+      originBankN: 'chile', destBankN: 'chile',
+      candidate: { ...empty, ob: 'chile', db: 'chile', da: '99999999' },
+    })
+    expect(dup).toBe(false)
+  })
+
+  it('ingreso: usa la cuenta de ORIGEN como contraparte (no la de destino)', () => {
+    const dup = isDuplicateTransferCandidate({
+      txType: 'ingreso', txnId: '', originAcctD: '4070186701', destAcctD: '',
+      originBankN: 'chile', destBankN: '',
+      candidate: { ...empty, oa: '4070186701' },
+    })
+    expect(dup).toBe(true)
+  })
+
+  it('sin ninguna señal en común no es duplicado', () => {
+    const dup = isDuplicateTransferCandidate({
+      txType: 'gasto', txnId: '', originAcctD: '', destAcctD: '',
+      originBankN: '', destBankN: '',
+      candidate: empty,
+    })
+    expect(dup).toBe(false)
   })
 })

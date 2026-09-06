@@ -1,5 +1,5 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
-import { digits, acctKey, normBank, nameTokens, nameTokensLoose, normDate, tokens, nextMonthStr } from './helpers.ts'
+import { digits, acctKey, normBank, nameTokens, nameTokensLoose, normDate, tokens, nextMonthStr, isDuplicateTransferCandidate } from './helpers.ts'
 
 // Ingesta de transferencias bancarias desde Gmail (Santander, Banco de Chile, Banco Ripley).
 // Clasifica por cuenta(account_number) -> RUT -> nombre(>=2 tokens) -> hints originMine/destMine.
@@ -384,27 +384,12 @@ Deno.serve(async (req) => {
   // Dedup cross-bank
   const { data: cands } = await sb.from('transactions').select('id, description')
     .eq('profile_id', profileId).eq('source', 'gmail_transfer').eq('date', dateStr).or(`amount.eq.${-amount},amount.eq.${amount}`)
-  const newAccts = [originAcctD, destAcctD].filter(Boolean).map(acctKey)
-  const newPair = [originBankN, destBankN].filter(Boolean).sort().join('|')
   for (const c of (cands ?? [])) {
-    const t = tokens(String(c.description ?? ''))
-    const exAccts = [t.oa, t.da].filter(Boolean).map(acctKey)
-    const sameTx = txnId && t.tx && txnId === t.tx
-    let dup = !!sameTx
-    if (!dup && txType === 'transfer') {
-      // Interna: los 2 correos del MISMO movimiento comparten alguna cuenta o el par de bancos.
-      const sharesAcct = newAccts.some(a => exAccts.includes(a))
-      const exPair = [t.ob, t.db].filter(Boolean).sort().join('|')
-      const samePair = !!(newPair && exPair && newPair === exPair)
-      dup = sharesAcct || samePair
-    } else if (!dup) {
-      // Gasto/ingreso a/de un TERCERO: solo es duplicado si coincide la cuenta de la CONTRAPARTE.
-      // NO basta con compartir el origen (tu misma cuenta paga muchos gastos distintos el mismo
-      // día por el mismo monto — eran falsos duplicados que se perdían en silencio).
-      const cpKey = acctKey(txType === 'gasto' ? destAcctD : originAcctD)
-      dup = !!cpKey && exAccts.includes(cpKey)
-    }
-    if (dup) return json({ ok: true, inserted: false, reason: 'duplicate', matched: c.id })
+    const isDup = isDuplicateTransferCandidate({
+      txType, txnId, originAcctD, destAcctD, originBankN, destBankN,
+      candidate: tokens(String(c.description ?? '')),
+    })
+    if (isDup) return json({ ok: true, inserted: false, reason: 'duplicate', matched: c.id })
   }
 
   // Dedup cross-fuente POR PATA (no por transferencia entera): la misma transferencia ya pudo
