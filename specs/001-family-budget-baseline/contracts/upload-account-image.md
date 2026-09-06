@@ -33,4 +33,4 @@ CORS preflight (`OPTIONS`) is handled explicitly since the browser sends a non-s
 
 ## Traces to
 
-User Story 7 (Cuentas screen); not explicitly enumerated as its own FR in spec.md — candidate gap for `/speckit-converge` to flag as `unrequested`-but-justified, or for a future spec update to add an explicit FR.
+User Story 7 (Cuentas screen), FR-019a.

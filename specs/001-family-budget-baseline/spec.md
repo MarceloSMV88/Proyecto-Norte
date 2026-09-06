@@ -119,6 +119,7 @@ El usuario ve todas sus cuentas (corrientes, ahorro, crédito) agrupadas por tip
 **Acceptance Scenarios**:
 
 1. **Given** cuentas de tipo Cuenta, Ahorro y Crédito con saldos, **When** el usuario abre Cuentas, **Then** ve el patrimonio neto y el desglose Disponible/Ahorro/Deudas, y las tarjetas de crédito con saldo negativo se muestran en rojo.
+2. **Given** una cuenta existente, **When** el usuario sube una imagen personalizada para ella (máx. 3 MiB, tipo `image/*`), **Then** la imagen queda asociada a la cuenta y visible en su tarjeta; un archivo que no sea imagen o exceda el tamaño máximo se rechaza sin modificar la cuenta.
 
 ---
 
@@ -199,6 +200,7 @@ El usuario ajusta apariencia (tema oscuro/claro, color de acento, densidad) y pr
 - **FR-017**: El sistema MUST permitir crear metas de ahorro con objetivo, aporte mensual, color y fecha límite opcional, y aportar manualmente a ellas.
 - **FR-018**: El sistema MUST calcular la proyección de meses restantes de una meta como `ceil((objetivo − actual) / aporte_mensual)`.
 - **FR-019**: El sistema MUST calcular y mostrar el patrimonio neto como la suma de cuentas líquidas y de ahorro menos el saldo usado de las cuentas de crédito.
+- **FR-019a**: El sistema MUST permitir subir una imagen personalizada por cuenta (máx. 3 MiB, `content-type` `image/*`), rechazando archivos que no sean imagen o excedan el tamaño máximo sin modificar la cuenta.
 - **FR-020**: El sistema MUST calcular insights de hábitos: categorías de mayor gasto, promedio diario, proyección de cierre de mes, y suscripciones con bajo uso como fugas potenciales.
 - **FR-021**: El sistema MUST permitir registrar compromisos mensuales recurrentes y transicionar su estado (pendiente, detectado, pagado, vencido, omitido, sin_gasto) automáticamente cuando un movimiento coincidente se registra o se ingesta.
 - **FR-022**: El sistema MUST persistir preferencias de apariencia (tema, acento, densidad) y de cuenta (moneda, alertas, detección de suscripciones, resumen por correo) por usuario.

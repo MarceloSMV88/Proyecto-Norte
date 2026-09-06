@@ -29,5 +29,5 @@ No `NEEDS CLARIFICATION` markers remain in the Technical Context — this is a r
 
 ## Open follow-ups (not blocking this baseline)
 
-- No automated test suite exists; introducing one (unit tests for `computeSummary()`/`clp()`, integration tests for ingestion parsers) is a natural next feature, not part of this baseline documentation pass.
-- The constitution is unratified; running `/speckit-constitution` would let future plans gate on real MUST principles (e.g., "RLS is the sole privacy boundary") instead of skipping the Constitution Check.
+- ~~No automated test suite exists~~ — resolved by T049: Vitest, with unit tests for `computeSummary()`/`clp()` in `lib/utils.ts` and parser/normalization tests for the three ingestion functions (`npm test`).
+- ~~The constitution is unratified~~ — resolved by T050: `.specify/memory/constitution.md` v1.0.0 (ratified 2026-09-06) now has 5 real MUST principles future plans gate on.

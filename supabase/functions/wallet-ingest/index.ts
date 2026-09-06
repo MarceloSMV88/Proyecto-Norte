@@ -1,4 +1,5 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
+import { parseWalletNotification } from './parse.ts'
 
 // Ingesta de gastos con tarjeta desde notificaciones de Google Wallet.
 // Flujo: MacroDroid (Android) -> POST aquí -> parsea -> inserta transaction + sube deuda TC.
@@ -55,11 +56,7 @@ Deno.serve(async (req) => {
 
   // 3) Parseo (formato Google Wallet: título=comercio, cuerpo="CLP1,500 with <tarjeta> ••5116")
   //    Tolerante: acepta "CLP 1.500" / "$1.500" y "with"/"con".
-  const merchant = title.replace(/\s+/g, ' ').trim()
-  const amountMatch = text.match(/(?:CLP|\$)\s*([\d.,]+)/i)
-  const amt = amountMatch ? parseInt(amountMatch[1].replace(/[^0-9]/g, ''), 10) : NaN
-  const last4 = (text.match(/(\d{4})(?=\D*$)/) ?? [])[1] ?? null
-  const cardName = (text.match(/(?:with|con)\s+(.+?)\s+[••·*]{1,2}\s*\d{4}/i) ?? [])[1] ?? null
+  const { merchant, amt, last4, cardName } = parseWalletNotification(title, text)
 
   if (!merchant || isNaN(amt) || amt <= 0) {
     await logFailure('parse_failed', { title, text, postTime })

@@ -1,6 +1,6 @@
 # Quickstart Validation: Gestión Financiera Familiar (Baseline Actual)
 
-Manual validation guide to confirm the baseline behaves as documented in [spec.md](./spec.md). Not an automated test suite (none exists yet — see [research.md](./research.md)).
+Manual validation guide to confirm the baseline behaves as documented in [spec.md](./spec.md). This is a UI/end-to-end walkthrough, not a substitute for the automated Vitest suite (`npm test`, see [research.md](./research.md)) — that suite covers `lib/utils.ts` and the ingestion parsers at the unit level; this document exercises the running app against a real Supabase project.
 
 ## Prerequisites
 
@@ -80,3 +80,51 @@ curl -X POST "$env:SUPABASE_FUNCTIONS_URL/wallet-ingest" `
 
 1. Change theme/accent/density in Ajustes.
 2. Reload → confirm the preference persisted for that profile.
+
+---
+
+## Validation Results (2026-09-06)
+
+Run against the real Supabase project (`gfswrtyxgsxakkpgduda`), not a seeded/test project. Split
+into what an agent can verify headlessly (build, edge functions, formulas against real data via
+read-only SQL) versus what requires a human clicking through an authenticated browser session
+(Google OAuth has no automatable credential here, and reading full personal financial detail
+beyond what's needed to check a formula is intentionally gated).
+
+**Verified automatically:**
+
+- `npm run build` — compiles cleanly against `.env.local` pointed at the real project; `proxy.ts`
+  (not `middleware.ts`) confirmed as the active convention (route shows as `ƒ Proxy (Middleware)`).
+- Scenario 5, auth-reject: `wallet-ingest`, `notif-ingest`, `transfer-ingest` all return `401` for
+  a wrong `x-ingest-secret`. ✅
+- Scenario 5, success path: exercised live and for real on 2026-09-05 while fixing a production
+  bug in `wallet-ingest`'s dedup (see git history) — stronger evidence than a synthetic curl call.
+- Scenario 5, malformed-payload → `ingest_failures` + `400`: **not run** — requires the real
+  ingest secret, which this session is deliberately blocked from reading. Run manually if desired:
+  the one `curl` command in Scenario 5 above, with a garbage `text` field.
+- Scenario 2 formula (`safeToday`): computed from real `category_budgets`/`categories` for the
+  current month (2026-09) — `variableAssigned = $2.250.000`, `variableSpent = $396.923`,
+  `daysLeft = 24` (2026-09-06) → expected hero figure `$77.200`. Not visually confirmed in the
+  UI (requires login) — open Resumen and compare.
+- Scenario 6 formula (goal projection `ceil((target−current)/monthly)`): both real goals compute
+  to exactly **3 meses** (`(720000−360000)/120000` and `(480000−240000)/80000`). Not visually
+  confirmed in the UI.
+- Scenario 7 formula (net worth): real accounts → liquid `$1.357.816` + savings `$17.835.127` −
+  used credit `$473.500` = **$18.719.443**. Not visually confirmed in the UI.
+- Scenario 9 (commitment auto-link): real `monthly_commitments` for 2026-09 show multiple rows
+  with `status = 'pagado'` and a non-null `paid_transaction_id` — the auto-link behavior is
+  demonstrably working on production data, not just in theory. No `vencido` example currently
+  exists in the data (nothing overdue yet this month), so that specific transition is unverified
+  this run.
+
+**Requires a manual click-through (not run this session):**
+
+- Scenario 1 (Google OAuth login, profile isolation Admin vs Pro) — needs an interactive browser
+  session with real Google credentials.
+- Scenario 3 (budgeting UI states), Scenario 4 (transaction modal + filters), Scenario 8
+  (habits/fugas rendering), Scenario 10 (settings persistence) — all UI-only, not meaningfully
+  checkable without rendering the app.
+
+**Conclusion**: no discrepancies found between the documented formulas and real production data.
+The gaps above are about tooling access (no browser automation, no ingest secret in this
+session), not about anything failing.
