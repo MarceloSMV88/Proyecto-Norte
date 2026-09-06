@@ -42,3 +42,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# supabase CLI temp
+/supabase/.temp/
+
+# cartolas y capturas reales usadas para probar los parsers de ingesta (datos personales)
+/Archivos/
+/Handoff.zip
