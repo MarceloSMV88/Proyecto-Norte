@@ -89,15 +89,19 @@ Deno.serve(async (req) => {
     profileId = prof.id
   }
 
-  // 5) Dedup: misma compra (comercio+monto) en los últimos 5 minutos, dentro del mismo perfil
-  const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
-  const { data: dup } = await sb.from('transactions')
+  // 5) Dedup: misma compra ya insertada, dentro del mismo perfil. Antes era una ventana de
+  // 5 min sobre created_at, pero Wallet puede mandar dos notificaciones de la misma compra NFC
+  // (pendiente + confirmada) con más minutos de diferencia -- visto 2026-09-05: MERCADOPAGO
+  // *NANY $59.680 duplicado con ~15 min entre avisos, fuera de la ventana. Igual que el
+  // anti-carrera contra notif-ingest (paso 8), se compara por cuenta+monto+fecha en vez de un
+  // timestamp relativo.
+  let dupQuery = sb.from('transactions')
     .select('id')
     .eq('profile_id', profileId)
-    .eq('name', merchant)
     .eq('amount', -amt)
-    .gte('created_at', fiveMinAgo)
-    .limit(1)
+    .eq('date', dateStr)
+  if (accountId) dupQuery = dupQuery.eq('account_id', accountId)
+  const { data: dup } = await dupQuery.limit(1)
   if (dup && dup.length > 0) {
     return json({ ok: true, inserted: false, reason: 'duplicate' })
   }
