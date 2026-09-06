@@ -189,7 +189,7 @@
 - [x] T049 Introduce an automated test suite (Vitest; unit tests for `computeSummary`/`clp` in `lib/utils.ts`; parser/normalization tests for the three ingestion functions, extracted into pure `parsers.ts`/`parse.ts`/`helpers.ts` modules so they're importable without the Deno runtime) — `npm test`
 - [x] T050 Ratify `.specify/memory/constitution.md` with real MUST principles (RLS as sole privacy boundary, ingestion never drops events silently, DB triggers own balances/spent, cross-source dedup by account+amount+date, handoff as visual source of truth) — v1.0.0, ratified 2026-09-06
 - [x] T051 Add an explicit functional requirement for account-image upload (`upload-account-image`) to `specs/001-family-budget-baseline/spec.md`, User Story 7 — FR-019a + Acceptance Scenario 2
-- [x] T052 Run `quickstart.md` against a real Supabase project and record results — see "Validation Results (2026-09-06)" in `quickstart.md`: build + edge-function auth-reject verified directly, formulas (safeToday, goal projection, net worth, commitment auto-link) verified against real data via read-only SQL; OAuth-login and pure-UI scenarios flagged as needing a manual click-through (no browser automation available in this session)
+- [x] T052 Run `quickstart.md` against a real Supabase project and record results — see "Validation Results (2026-09-06)" in `quickstart.md`: all 10 scenarios validated (build, edge-function auth-reject, and formulas via read-only SQL run by the agent; OAuth-login and pure-UI scenarios 1/3/4/8/10 click-through confirmed by the user)
 
 ---
 

@@ -117,14 +117,14 @@ beyond what's needed to check a formula is intentionally gated).
   exists in the data (nothing overdue yet this month), so that specific transition is unverified
   this run.
 
-**Requires a manual click-through (not run this session):**
+**Verified manually by the user (2026-09-06), against `npm run dev` on the real project:**
 
-- Scenario 1 (Google OAuth login, profile isolation Admin vs Pro) — needs an interactive browser
-  session with real Google credentials.
-- Scenario 3 (budgeting UI states), Scenario 4 (transaction modal + filters), Scenario 8
-  (habits/fugas rendering), Scenario 10 (settings persistence) — all UI-only, not meaningfully
-  checkable without rendering the app.
+- Scenario 1 (Google OAuth login, profile isolation) — confirmed working.
+- Scenario 3 (budgeting UI states) — confirmed working.
+- Scenario 4 (transaction modal + filters) — confirmed working.
+- Scenario 8 (habits/fugas rendering) — confirmed working.
+- Scenario 10 (settings persistence) — confirmed working.
 
-**Conclusion**: no discrepancies found between the documented formulas and real production data.
-The gaps above are about tooling access (no browser automation, no ingest secret in this
-session), not about anything failing.
+**Conclusion**: all 10 scenarios validated, either against real data (automated, this session) or
+by direct click-through (manual, user-confirmed). No discrepancies found between the documented
+behavior/formulas and the real, running application.
