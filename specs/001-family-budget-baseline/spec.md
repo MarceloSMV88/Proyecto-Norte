@@ -151,6 +151,7 @@ El usuario gestiona una lista de pagos recurrentes esperados cada mes (arriendo,
 1. **Given** un compromiso mensual configurado, **When** llega el mes sin un movimiento que lo cubra, **Then** su estado es "pendiente" y, tras la fecha esperada, pasa a "vencido".
 2. **Given** un compromiso mensual, **When** un movimiento (manual o ingestado) calza con su monto y cuenta esperados, **Then** el compromiso pasa a estado "pagado" y queda vinculado a ese movimiento.
 3. **Given** un compromiso detectado automáticamente por una integración pero no confirmado, **When** se lista en Compromisos, **Then** se distingue como "detectado" hasta confirmación o hasta omitirse.
+4. **Given** un compromiso marcado como PAC (pago automático de cuentas) con un `due_day` fijo, **When** llega ese día del mes, **Then** el sistema MUST generar el movimiento y marcar el compromiso "pagado" sin depender de una notificación externa — algunos cargos PAC (ej. donaciones) no generan notificación al celular y quedarían silenciosamente fuera del registro si se dependiera solo de la ingesta.
 
 ---
 
@@ -203,6 +204,7 @@ El usuario ajusta apariencia (tema oscuro/claro, color de acento, densidad) y pr
 - **FR-019a**: El sistema MUST permitir subir una imagen personalizada por cuenta (máx. 3 MiB, `content-type` `image/*`), rechazando archivos que no sean imagen o excedan el tamaño máximo sin modificar la cuenta.
 - **FR-020**: El sistema MUST calcular insights de hábitos: categorías de mayor gasto, promedio diario, proyección de cierre de mes, y suscripciones con bajo uso como fugas potenciales.
 - **FR-021**: El sistema MUST permitir registrar compromisos mensuales recurrentes y transicionar su estado (pendiente, detectado, pagado, vencido, omitido, sin_gasto) automáticamente cuando un movimiento coincidente se registra o se ingesta.
+- **FR-021a**: El sistema MUST generar automáticamente, el día `due_day` de cada mes, el movimiento y el estado "pagado" de todo compromiso marcado como PAC (`payment_method = 'PAC'`), sin depender de una notificación bancaria externa.
 - **FR-022**: El sistema MUST persistir preferencias de apariencia (tema, acento, densidad) y de cuenta (moneda, alertas, detección de suscripciones, resumen por correo) por usuario.
 - **FR-023**: El sistema MUST formatear todos los montos monetarios en pesos chilenos (CLP) sin decimales, con separador de miles y signo menos unicode para negativos.
 
