@@ -13,12 +13,13 @@
 const ENDPOINT = 'https://gfswrtyxgsxakkpgduda.supabase.co/functions/v1/transfer-ingest';
 const SECRET   = 'bd7d9dfa18af488ca9b89e3335efedf56a9bdbb5892a4f96bd6dfde12874f29a';
 const LABEL    = 'norte-procesado';
-// Ojo: "Cargo en Cuenta" (Banco de Chile avisando un cargo de Servipag) NO se agrega a
-// propósito — Servipag ya manda su propio comprobante con el detalle real (empresa/monto);
-// procesar ambos duplicaría el gasto. SÍ se LEE aparte (ver buscarCargoEnCuenta) para sacarle
-// el único dato que el comprobante de Servipag no trae: la cuenta exacta cargada (****7004).
+// "Cargo en Cuenta" (aviso del Banco de Chile por compras con débito): desde 2026-10-10 SÍ se
+// ingesta (parseChileCargoCuenta), salvo los de Servipag — Servipag manda su propio comprobante
+// con el detalle real y ese aviso solo se LEE aparte (ver buscarCargoEnCuenta) para sacarle la
+// cuenta exacta cargada (****7004). Se busca por TEXTO del cuerpo, no por asunto.
 const SEARCH   = '((from:santander.cl OR from:bancochile.cl OR from:bancoripley.cl OR from:servipag.cl) '
                + 'subject:(transferencia OR Comprobante OR Transferencias OR Deuda OR Giro)) '
+               + 'OR (from:bancochile.cl "con cargo a Cuenta") '
                + 'OR (from:metlife.cl subject:(dividendo)) '
                + 'OR (from:transaccionalcoopeuch.com subject:(Cuotas)) '
                + 'OR (from:bancoestado.cl subject:(Comprobante OR Transferencias)) '
@@ -164,6 +165,10 @@ function parseChile(txt) {
   if (/Transferencia a terceros/i.test(txt)) return parseChileTerceros(txt);
   // Plantilla "Giro con Tarjeta de Débito" (retiro de efectivo en cajero automático)
   if (/giro\s+en\s+Cajero/i.test(txt)) return parseChileGiroCajero(txt);
+  // Plantilla "Comprobante de pago exitoso" (compra en un comercio pagada desde la App Mi Banco)
+  if (/Comprobante\s+de\s+pago\s+exitoso/i.test(txt) && /\bComercio\b/i.test(txt)) return parseChilePagoComercio(txt);
+  // Aviso "compra por $X con cargo a Cuenta ****NNNN en COMERCIO el dd/mm/yyyy" (pago con débito)
+  if (/compra\s+por\s*\$[\d.,\s]+con\s+cargo\s+a\s+Cuenta/i.test(txt)) return parseChileCargoCuenta(txt);
   const idxDest = txt.search(/Datos\s+de\s+la\s+Transferencia/i);
   const dBlk = txt.search(/Datos\s+del\s+Destinatario/i) > -1
     ? txt.slice(txt.search(/Datos\s+del\s+Destinatario/i), idxDest > -1 ? idxDest : undefined) : txt;
@@ -204,6 +209,63 @@ function parseChilePagoCuentas(txt) {
     });
   }
   return items;
+}
+
+// Plantilla "Comprobante de pago exitoso" (asunto "Comprobante de Pago", remitente
+// serviciodetransferencias@bancochile.cl): compra en un comercio pagada desde la App Mi Banco.
+//   "Detalle cuenta(s) pagada(s) · Comercio TICKETMASTER · Monto $ 68.000 · Detalle del pago ·
+//    Medio de pago Tarjeta de Débito ****0424 · ... · Fecha y Hora 06/10/2026 15:44:47"
+// Antes caía en la rama genérica de parseChile, que busca "Nombre" y lo encontraba en el pie de
+// seguridad ("...junto al nombre de la cuenta).") -> el gasto quedaba titulado
+// "Transferencia a de la cuenta)." (2026-10-06). Va como pago_servicio con el comercio de
+// título. El débito ****0424 no es un N° de cuenta: la cuenta se resuelve por banco (la Cta Cte
+// del Chile, que es la que respalda esa tarjeta). Puede traer N comercios -> array.
+function parseChilePagoComercio(txt) {
+  const date = g(/Fecha\s+y\s+Hora\s*[:\s]*(\d{1,2}\/\d{1,2}\/\d{4})/i, txt) || fechaChile(txt);
+  const items = [];
+  const re = /Comercio\s+([^\r\n$]+?)\s*[\r\n]+\s*Monto[^$]*\$\s*([\d.]+)/gi;
+  let m;
+  while ((m = re.exec(txt)) !== null) {
+    items.push({
+      kind: 'pago_servicio',
+      empresa: tituloComercio(m[1]),
+      identificador: '',
+      amount: m[2].replace(/\./g, ''),
+      date: date,
+      originBank: 'Banco de Chile',
+    });
+  }
+  // Plantilla reconocida pero sin comercio/monto: se manda igual sin monto para que el dispatch
+  // lo convierta en parse_failed (queda en ingest_failures en vez de perderse en silencio).
+  return items.length ? items : [{ kind: 'pago_servicio', amount: '' }];
+}
+
+// Aviso de compra con cargo en cuenta (remitente enviodigital@bancochile.cl):
+//   "Te informamos que se ha realizado una compra por $44.261 con cargo a Cuenta ****7004 en
+//    HDI SEGUROS SA el 10/10/2026 23:09."
+// Única fuente de los pagos con débito en comercios sin comprobante propio (caso real
+// 2026-10-10: seguro HDI, cuyo correo trae el monto solo en un PDF adjunto). El dedup contra
+// otras fuentes del mismo pago (comprobante, push) lo hace transfer-ingest por cuenta+monto+fecha.
+// Servipag se excluye: su comprobante ya trae el detalle por cuenta pagada y este aviso solo se
+// usa ahí como dato de apoyo (ver buscarCargoEnCuenta).
+function parseChileCargoCuenta(raw) {
+  const txt = stripHtml(raw).replace(/[\r\n]+/g, ' ');
+  const m = txt.match(/compra\s+por\s*\$\s*([\d.,]+)\s+con\s+cargo\s+a\s+Cuenta\s*\**\s*(\d{3,6})\s+en\s+(.+?)\s+el\s+(\d{1,2}\/\d{1,2}\/\d{4})/i);
+  if (!m) return { kind: 'cargo_cuenta', amount: '' };   // -> parse_failed en el dispatch
+  if (/servipag/i.test(m[3])) return null;
+  return {
+    kind: 'cargo_cuenta',
+    amount: m[1].replace(/\D/g, ''),
+    last4: m[2].slice(-4),
+    comercio: tituloComercio(m[3]),
+    date: m[4],
+  };
+}
+
+// "TICKETMASTER" -> "Ticketmaster", "MERCADO LIBRE" -> "Mercado Libre"
+function tituloComercio(s) {
+  return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase()
+    .replace(/(^|\s)(\S)/g, function (_, sp, c) { return sp + c.toUpperCase(); });
 }
 
 // Plantilla "Giro con Tarjeta de Débito" (retiro de efectivo en cajero, sin contraparte).
