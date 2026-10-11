@@ -1,5 +1,5 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
-import { digits, acctKey, normBank, nameTokens, nameTokensLoose, normDate, tokens, nextMonthStr, isDuplicateTransferCandidate } from './helpers.ts'
+import { digits, acctKey, normBank, nameTokens, normDate, tokens, nextMonthStr, isDuplicateTransferCandidate, partyName, pickCommitment, type CommitmentRow } from './helpers.ts'
 
 // Ingesta de transferencias bancarias desde Gmail (Santander, Banco de Chile, Banco Ripley).
 // Clasifica por cuenta(account_number) -> RUT -> nombre(>=2 tokens) -> hints originMine/destMine.
@@ -45,48 +45,31 @@ function json(body: unknown, status = 200) {
 //
 // Solo se corre UN mes y solo si la instancia del mes del pago existe y está tomada: si no hay
 // compromiso ese mes, el pago no le corresponde y no se especula con el siguiente.
+// anyCategory: solo para pagos de servicio SIN categoría por reglas — se buscan los compromisos
+// de todas las categorías y, si uno calza, el movimiento toma su categoría. No se usa para
+// transferencias: su descripción trae tags de banco (#db:santander) que calzarían con pistas
+// genéricas de otros compromisos (ej. "Santander" de la TC).
+// Devuelve la categoría del compromiso vinculado (o null si no vinculó).
 async function linkCommitment(
   sb: ReturnType<typeof createClient>, profileId: string, categoryId: string | null,
   txId: string, txName: string, txDesc: string, amount: number, dateStr: string,
-) {
-  if (!categoryId) return
+  anyCategory = false,
+): Promise<string | null> {
+  if (!categoryId && !anyCategory) return null
   const month = dateStr.slice(0, 7) + '-01'
-  const next = nextMonthStr(month)
-  const { data: rows } = await sb.from('monthly_commitments')
-    .select('id, name, matcher_hint, month, status, paid_transaction_id')
-    .eq('profile_id', profileId).eq('category_id', categoryId)
-    .in('month', [month, next])
-  if (!rows || rows.length === 0) return
+  let q = sb.from('monthly_commitments')
+    .select('id, name, matcher_hint, month, status, paid_transaction_id, category_id')
+    .eq('profile_id', profileId).in('month', [month, nextMonthStr(month)])
+  if (categoryId) q = q.eq('category_id', categoryId)
+  const { data: rows } = await q
+  if (!rows || rows.length === 0) return null
 
-  const haystack = nameTokensLoose(`${txName} ${txDesc}`).join(' ')
-  const hits = rows.filter(c => {
-    const hintTokens = nameTokensLoose(c.matcher_hint || c.name)
-    return hintTokens.length > 0 && hintTokens.every(t => haystack.includes(t))
-  })
-
-  // Libre = el usuario todavía no resolvió ese mes, en ningún sentido.
-  const isFree = (c: { status: string; paid_transaction_id: string | null }) =>
-    !c.paid_transaction_id && c.status !== 'pagado' && c.status !== 'omitido' && c.status !== 'sin_gasto'
-
-  const byName = new Map<string, typeof hits>()
-  for (const c of hits) byName.set(c.name, [...(byName.get(c.name) ?? []), c])
-
-  const candidates = []
-  for (const group of byName.values()) {
-    const cur = group.find(c => c.month === month)
-    if (!cur) continue
-    // sin_gasto NO se corre al mes siguiente: el usuario ya dijo que esta cuenta no corre, así
-    // que la identidad entera sale de la disputa por este pago.
-    if (cur.status === 'sin_gasto') continue
-    if (isFree(cur)) { candidates.push(cur); continue }
-    const nxt = group.find(c => c.month === next)
-    if (nxt && isFree(nxt)) candidates.push(nxt)
-  }
-
-  if (candidates.length !== 1) return
+  const pick = pickCommitment(rows as CommitmentRow[], `${txName} ${txDesc}`, month)
+  if (!pick) return null
   await sb.from('monthly_commitments').update({
     status: 'pagado', actual_amount: Math.abs(amount), paid_transaction_id: txId,
-  }).eq('id', candidates[0].id)
+  }).eq('id', pick.id)
+  return pick.category_id ?? null
 }
 
 Deno.serve(async (req) => {
@@ -227,6 +210,61 @@ Deno.serve(async (req) => {
     return json({ ok: true, inserted: true, id: ins.id, kind: 'giro_cajero', amount: amt, account_matched: !!acc, date: dateStr })
   }
 
+  // === Compra con cargo en cuenta (aviso genérico del Banco de Chile, ej. pago con débito) ===
+  // "se ha realizado una compra por $44.261 con cargo a Cuenta ****7004 en HDI SEGUROS SA el
+  // 10/10/2026 23:09." Es la única fuente de pagos con débito en comercios que no mandan
+  // comprobante propio (caso real 2026-10-10: seguro HDI). Como el MISMO pago puede llegar
+  // además por un comprobante más detallado (pago_servicio) o por push (bank_app), el dedup es
+  // por cuenta + monto + fecha contra CUALQUIER fuente. Si el comprobante llega después, la
+  // rama pago_servicio completa esta fila (source 'gmail_cargo') en vez de duplicarla.
+  if (String(b.kind ?? '') === 'cargo_cuenta') {
+    const amt = parseInt(digits(b.amount), 10)
+    if (!amt || amt <= 0) { await logFailure('bad_amount', b); return json({ error: 'bad_amount', got: b.amount }, 400) }
+    const last4 = digits(b.last4).slice(-4)
+    const comercio = String(b.comercio ?? '').replace(/\s+/g, ' ').trim()
+    if (!comercio) { await logFailure('bad_empresa', b); return json({ error: 'bad_empresa' }, 400) }
+    const dateStr = normDate(b.date)
+
+    const { data: adminProf } = await sb.from('profiles').select('id').eq('role', 'Admin').limit(1).single()
+    if (!adminProf) return json({ error: 'no_profile' }, 500)
+    const profileId = adminProf.id as string
+
+    const { data: accts } = await sb.from('accounts').select('id, account_number, last4, type').eq('profile_id', profileId)
+    const byL4 = (accts ?? []).filter(a => last4.length === 4 &&
+      ((a.last4 && a.last4 === last4) || (a.account_number && digits(a.account_number).endsWith(last4))))
+    const acc = byL4.find(a => a.type !== 'Crédito') ?? byL4[0] ?? null
+    if (!acc) { await logFailure('account_not_found', b); return json({ error: 'account_not_found' }, 400) }
+
+    const { data: dup } = await sb.from('transactions').select('id, source')
+      .eq('profile_id', profileId).eq('account_id', acc.id).eq('amount', -amt).eq('date', dateStr).limit(1)
+    if (dup && dup.length > 0) return json({ ok: true, inserted: false, reason: 'duplicate', existing_source: dup[0].source })
+
+    let categoryId: string | null = null
+    const { data: rules } = await sb.from('category_rules').select('pattern, category_name').eq('profile_id', profileId)
+    const up = comercio.toUpperCase()
+    const match = (rules ?? []).filter(r => up.includes(String(r.pattern).toUpperCase()))
+      .sort((r1, r2) => String(r2.pattern).length - String(r1.pattern).length)[0]
+    if (match) {
+      const { data: cat } = await sb.from('categories').select('id')
+        .eq('profile_id', profileId).eq('name', match.category_name).limit(1).maybeSingle()
+      if (cat) categoryId = cat.id
+    }
+
+    const { data: ins, error: insErr } = await sb.from('transactions').insert({
+      profile_id: profileId, name: comercio, amount: -amt, type: 'gasto',
+      category_id: categoryId, account_id: acc.id,
+      description: 'Compra con cargo en cuenta', source: 'gmail_cargo', date: dateStr,
+    }).select('id').single()
+    if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
+
+    // Solo el nombre del comercio como texto de match (sin tags de banco): seguro para buscar
+    // compromisos en todas las categorías cuando no hubo regla.
+    const linkedCat = await linkCommitment(sb, profileId, categoryId, ins.id, comercio, '', -amt, dateStr, !categoryId)
+    if (!categoryId && linkedCat) await sb.from('transactions').update({ category_id: linkedCat }).eq('id', ins.id)
+
+    return json({ ok: true, inserted: true, id: ins.id, kind: 'cargo_cuenta', comercio, amount: amt, date: dateStr })
+  }
+
   // === Pago de cuentas de servicio (mail "Comprobante de pago" del Chile, N items por mail;
   // o cualquier pago con "empresa" identificable: Servipag, dividendos de créditos hipotecarios, etc.) ===
   // Cada item es un gasto: cargo a la cuenta de origen + categoría por reglas sobre
@@ -307,18 +345,42 @@ Deno.serve(async (req) => {
       }
     }
 
-    const { data: ins, error: insErr } = await sb.from('transactions').insert({
-      profile_id: profileId, name: empresa, amount: -amt, type: 'gasto',
-      category_id: categoryId, account_id: acc?.id ?? null,
-      description: identificador ? `N° cliente ${identificador}` : null,
-      source: 'gmail_pago', date: dateStr,
-    }).select('id').single()
-    if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
+    const fields = {
+      name: empresa, category_id: categoryId,
+      description: identificador ? `N° cliente ${identificador}` : null, source: 'gmail_pago',
+    }
+    // Si el aviso genérico "compra ... con cargo a Cuenta ****7004" (kind cargo_cuenta) llegó
+    // ANTES que este comprobante, el movimiento ya existe con menos detalle: se completa esa
+    // fila en vez de insertar otra (mismo pago real => misma cuenta + monto + fecha).
+    let ins: { id: string } | null = null
+    if (acc) {
+      const { data: prev } = await sb.from('transactions').select('id')
+        .eq('profile_id', profileId).eq('account_id', acc.id).eq('source', 'gmail_cargo')
+        .eq('amount', -amt).eq('date', dateStr).limit(1).maybeSingle()
+      if (prev) {
+        await sb.from('transactions').update(fields).eq('id', prev.id)
+        await sb.from('monthly_commitments').update({ status: 'pendiente', actual_amount: 0, paid_transaction_id: null })
+          .eq('paid_transaction_id', prev.id)
+        ins = prev
+      }
+    }
+    if (!ins) {
+      const { data, error: insErr } = await sb.from('transactions').insert({
+        profile_id: profileId, amount: -amt, type: 'gasto', account_id: acc?.id ?? null, date: dateStr, ...fields,
+      }).select('id').single()
+      if (insErr) return json({ error: 'insert_failed', detail: insErr.message }, 500)
+      ins = data
+    }
 
     // El saldo lo sincroniza el trigger de BD (migración 006).
-    await linkCommitment(sb, profileId, categoryId, ins.id, empresa, identificador, -amt, dateStr)
+    // Sin regla de categoría: se intenta igual contra los compromisos de todas las categorías
+    // (caso real 2026-10-10: Aguas Andinas del depto de Conchalí en un multipago Santander quedó
+    // sin categoría ni vínculo aunque su compromiso tenía la pista exacta "aguas andinas 1951120").
+    const txId = ins!.id
+    const linkedCat = await linkCommitment(sb, profileId, categoryId, txId, empresa, identificador, -amt, dateStr, !categoryId)
+    if (!categoryId && linkedCat) await sb.from('transactions').update({ category_id: linkedCat }).eq('id', txId)
 
-    return json({ ok: true, inserted: true, id: ins.id, kind: 'pago_servicio', empresa, amount: amt, account_matched: !!acc, category_matched: !!categoryId, date: dateStr })
+    return json({ ok: true, inserted: true, id: txId, kind: 'pago_servicio', empresa, amount: amt, account_matched: !!acc, category_matched: !!(categoryId || linkedCat), date: dateStr })
   }
 
   const amount = parseInt(digits(b.amount), 10)
@@ -335,8 +397,10 @@ Deno.serve(async (req) => {
   const destBankRaw = String(b.destBank ?? '').trim()
   const originBankN = normBank(originBankRaw)
   const destBankN = normBank(destBankRaw)
-  const originName = String(b.originName ?? '').trim()
-  const destName = String(b.destName ?? '').trim()
+  // partyName descarta fragmentos de frase que un regex de etiqueta capturó por error
+  // (ej. "de la cuenta)."), para que nunca terminen como título del movimiento.
+  const originName = partyName(b.originName)
+  const destName = partyName(b.destName)
   const comment = String(b.comment ?? '').trim()
   const txnId = String(b.txnId ?? '').trim().replace(/\s+/g, '')
   const originMine = b.originMine === true
@@ -462,10 +526,16 @@ Deno.serve(async (req) => {
     if (originAcc && !originCoveredByPush) legs.push({ account_id: originAcc.id, amount: -amount, name: `Transferencia a ${destBankRaw || destName || 'mis cuentas'}` })
     if (destAcc && !destCoveredByPush) legs.push({ account_id: destAcc.id, amount: amount, name: `Transferencia desde ${originBankRaw || originName || 'mis cuentas'}` })
     if (legs.length === 0) legs.push({ account_id: null, amount: -amount, name: `Transferencia ${originName || ''} → ${destName || ''}`.trim() })
-  } else if (txType === 'ingreso') {
-    legs.push({ account_id: destAcc?.id ?? null, amount: amount, name: `Transferencia de ${originName || 'tercero'}` })
   } else {
-    legs.push({ account_id: originAcc?.id ?? null, amount: -amount, name: `Transferencia a ${destName || 'tercero'}` })
+    // Sin nombre de contraparte usable: el comentario de la transferencia es lo más
+    // característico que queda. Si tampoco hay, se marca para revisar y el payload queda en
+    // ingest_failures para poder ajustar el parser de esa plantilla de correo.
+    const party = txType === 'ingreso' ? originName : destName
+    if (!party && !comment) await logFailure('unnamed_party', b)
+    const label = party || comment || 'tercero (revisar)'
+    legs.push(txType === 'ingreso'
+      ? { account_id: destAcc?.id ?? null, amount: amount, name: `Transferencia de ${label}` }
+      : { account_id: originAcc?.id ?? null, amount: -amount, name: `Transferencia a ${label}` })
   }
 
   const rows = legs.map(l => ({ profile_id: profileId, name: l.name, amount: l.amount, type: txType, category_id: txType === 'gasto' ? gastoCategoryId : (l.amount > 0 ? savingsCategoryId : null), account_id: l.account_id, description, source: 'gmail_transfer', date: dateStr }))

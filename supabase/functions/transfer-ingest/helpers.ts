@@ -88,3 +88,58 @@ export function isDuplicateTransferCandidate(params: {
   const exCpKey = acctKey(txType === 'gasto' ? t.da : t.oa)
   return !exCpKey && samePair
 }
+
+// Palabras que aparecen como ETIQUETAS en los comprobantes (no como parte de un nombre real).
+const LABEL_WORDS = new Set(['cuenta', 'corriente', 'vista', 'ahorro', 'rut', 'banco', 'chile', 'estado',
+  'destinatario', 'destino', 'origen', 'monto', 'nombre', 'apellido', 'transferencia', 'tipo', 'email',
+  'de', 'del', 'la', 'el', 'los', 'las', 'a', 'al', 'y', 'en', 'su', 'tu'])
+
+// Nombre de la contraparte usable como título del movimiento, o '' si lo que extrajo el parser no
+// es un nombre sino un fragmento de frase/etiqueta del correo (caso real 2026-10-06: un pago a
+// Ticketmaster desde Banco de Chile quedó como "Transferencia a de la cuenta).").
+export function partyName(s: unknown): string {
+  const n = String(s ?? '').replace(/\s+/g, ' ').trim()
+  if (!n) return ''
+  if (/[()$:;=<>#*@]/.test(n) || /\d{3,}/.test(n)) return ''
+  if (/^(de|del|la|el|los|las|al|a|en|su|tu)\b/.test(n)) return ''
+  const words = n.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean)
+  if (!words.some(w => w.length >= 2 && !LABEL_WORDS.has(w))) return ''
+  return n
+}
+
+export type CommitmentRow = { id: string; name: string; matcher_hint: string | null; month: string; status: string; paid_transaction_id: string | null; category_id?: string | null }
+
+// Elige el compromiso que paga un movimiento: todos los tokens de su matcher_hint (o de su nombre)
+// deben aparecer en el texto del movimiento. Los compromisos se agrupan por name (= identidad
+// estable mes a mes): si el del mes ya está resuelto, el pago se corre al del mes siguiente.
+// Devuelve null si no hay candidato o si hay más de uno (ambiguo => mejor no vincular).
+export function pickCommitment(rows: CommitmentRow[], text: string, month: string): CommitmentRow | null {
+  const next = nextMonthStr(month)
+  const haystack = nameTokensLoose(text).join(' ')
+  const hits = rows.filter(c => {
+    const hintTokens = nameTokensLoose(c.matcher_hint || c.name)
+    return hintTokens.length > 0 && hintTokens.every(t => haystack.includes(t))
+  })
+
+  // Libre = el usuario todavía no resolvió ese mes, en ningún sentido.
+  const isFree = (c: CommitmentRow) =>
+    !c.paid_transaction_id && c.status !== 'pagado' && c.status !== 'omitido' && c.status !== 'sin_gasto'
+
+  const byName = new Map<string, CommitmentRow[]>()
+  // Clave = categoría + nombre: el mismo nombre puede existir en otra categoría (ej. "Gasto común"
+  // de dos propiedades distintas) y son identidades distintas.
+  for (const c of hits) { const k = `${c.category_id ?? ''}|${c.name}`; byName.set(k, [...(byName.get(k) ?? []), c]) }
+
+  const candidates: CommitmentRow[] = []
+  for (const group of byName.values()) {
+    const cur = group.find(c => c.month === month)
+    if (!cur) continue
+    // sin_gasto NO se corre al mes siguiente: el usuario ya dijo que esta cuenta no corre, así
+    // que la identidad entera sale de la disputa por este pago.
+    if (cur.status === 'sin_gasto') continue
+    if (isFree(cur)) { candidates.push(cur); continue }
+    const nxt = group.find(c => c.month === next)
+    if (nxt && isFree(nxt)) candidates.push(nxt)
+  }
+  return candidates.length === 1 ? candidates[0] : null
+}

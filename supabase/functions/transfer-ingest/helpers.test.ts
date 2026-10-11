@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { digits, acctKey, normBank, nameTokens, nameTokensLoose, normDate, tokens, nextMonthStr, isDuplicateTransferCandidate } from './helpers.ts'
+import { digits, acctKey, normBank, nameTokens, nameTokensLoose, normDate, tokens, nextMonthStr, isDuplicateTransferCandidate, partyName, pickCommitment, type CommitmentRow } from './helpers.ts'
 
 describe('digits', () => {
   it('deja solo los dígitos, quitando guiones', () => {
@@ -188,5 +188,83 @@ describe('isDuplicateTransferCandidate', () => {
       candidate: empty,
     })
     expect(dup).toBe(false)
+  })
+})
+
+describe('partyName', () => {
+  it('acepta nombres reales de personas y empresas', () => {
+    expect(partyName('Alex Maximiliano Reveco Flores')).toBe('Alex Maximiliano Reveco Flores')
+    expect(partyName('ASSETPLAN RECAUDACION SPA')).toBe('ASSETPLAN RECAUDACION SPA')
+    expect(partyName('EQUIPOS CONTRA INCENDIOS ALEXIS BORIS HERNANDEZ FRITZ EIRL')).toBe('EQUIPOS CONTRA INCENDIOS ALEXIS BORIS HERNANDEZ FRITZ EIRL')
+    expect(partyName('Isapre Colmena')).toBe('Isapre Colmena')
+  })
+
+  it('limpia espacios sobrantes', () => {
+    expect(partyName('  Gustavo   Aguilera ')).toBe('Gustavo Aguilera')
+  })
+
+  it('rechaza fragmentos de frase capturados por un regex de etiqueta (caso real Ticketmaster 2026-10-06)', () => {
+    // parseChile tomó "Nombre ... de la cuenta)." de un comprobante de pago y quedó el título
+    // "Transferencia a de la cuenta)." — no identifica nada.
+    expect(partyName('de la cuenta).')).toBe('')
+  })
+
+  it('rechaza textos que son etiquetas/campos del correo y no un nombre', () => {
+    expect(partyName('Cuenta Corriente')).toBe('')
+    expect(partyName('del destinatario')).toBe('')
+    expect(partyName('Banco de Chile')).toBe('')
+    expect(partyName('$ 68.000')).toBe('')
+    expect(partyName('12.345.678-9')).toBe('')
+  })
+
+  it('vacío / null => vacío', () => {
+    expect(partyName('')).toBe('')
+    expect(partyName(undefined)).toBe('')
+  })
+})
+
+describe('pickCommitment', () => {
+  const c = (o: Partial<CommitmentRow> & { id: string; name: string }): CommitmentRow =>
+    ({ matcher_hint: null, month: '2026-10-01', status: 'pendiente', paid_transaction_id: null, category_id: 'cat', ...o })
+
+  it('caso real 2026-10-10: Aguas Andinas del multipago calza con "Agua 19511200" por empresa + N° cliente', () => {
+    const rows = [
+      c({ id: 'conchali', name: 'Agua 19511200', matcher_hint: 'aguas andinas 1951120', category_id: 'conchali' }),
+      c({ id: 'vlc', name: 'Agua 2768568-4', category_id: 'vlc' }),
+      c({ id: 'gc', name: 'Gasto común', matcher_hint: 'Condominio', category_id: 'conchali' }),
+    ]
+    expect(pickCommitment(rows, 'Aguas andinas s.a. 1951120-0', '2026-10-01')?.id).toBe('conchali')
+  })
+
+  it('dos compromisos con la misma pista (Mini y Perlita) => ambiguo, no vincula', () => {
+    const rows = [
+      c({ id: 'mini', name: 'Mini - Costanera norte', matcher_hint: 'Costanera Norte' }),
+      c({ id: 'perlita', name: 'Perlita - Costanera norte', matcher_hint: 'Costanera Norte' }),
+    ]
+    expect(pickCommitment(rows, 'Autopista costanera norte 167987184', '2026-10-01')).toBeNull()
+  })
+
+  it('con el N° de cliente en la pista, cada vehículo se distingue', () => {
+    const rows = [
+      c({ id: 'mini', name: 'Mini - Vespucio Norte', matcher_hint: 'Vespucio Norte 001104066144' }),
+      c({ id: 'perlita', name: 'Perlita - Vespucio Norte', matcher_hint: 'Vespucio Norte 001101347405' }),
+    ]
+    expect(pickCommitment(rows, 'Autopista vespucio norte express 001101347405', '2026-10-01')?.id).toBe('perlita')
+  })
+
+  it('mismo nombre en dos categorías distintas no se mezcla', () => {
+    const rows = [
+      c({ id: 'gc-conchali', name: 'Gasto común', matcher_hint: 'Condominio', category_id: 'conchali' }),
+      c({ id: 'gc-vlc', name: 'Gasto común', matcher_hint: 'Comunidad VLC', category_id: 'vlc', status: 'pagado' }),
+    ]
+    expect(pickCommitment(rows, 'Condominio Los Aromos 123', '2026-10-01')?.id).toBe('gc-conchali')
+  })
+
+  it('si el del mes ya está pagado, se corre al del mes siguiente', () => {
+    const rows = [
+      c({ id: 'oct', name: 'Agua 19511200', matcher_hint: 'aguas andinas 1951120', status: 'pagado' }),
+      c({ id: 'nov', name: 'Agua 19511200', matcher_hint: 'aguas andinas 1951120', month: '2026-11-01' }),
+    ]
+    expect(pickCommitment(rows, 'Aguas andinas s.a. 1951120-0', '2026-10-01')?.id).toBe('nov')
   })
 })
