@@ -486,7 +486,17 @@ export default function CompromisosPage() {
     const activeCategoryIds = new Set(categories.map(c => c.id))
     const eligible = previous.filter(c => activeCategoryIds.has(c.category_id))
     const skipped = previous.length - eligible.length
-    const payload: CommitmentInsert[] = eligible.map(c => ({
+    // No duplicar lo que el mes ya tiene. Caso real 2026-10-02: run_pac_auto_charges creó el
+    // "PAC Protectora de la Infancia" de octubre el día 1 (pagado), y "Traer mes anterior" al
+    // día siguiente lo volvió a insertar en pendiente -> quedó duplicado y "vencido".
+    // Identidad = categoría + nombre (mismo criterio que pickCommitment en transfer-ingest).
+    const { data: current } = await supabase.from('monthly_commitments')
+      .select('category_id, name')
+      .eq('profile_id', activeProfile.id)
+      .eq('month', selectedMonth)
+    const existing = new Set((current || []).map(c => `${c.category_id}|${c.name}`))
+    const toCopy = eligible.filter(c => !existing.has(`${c.category_id}|${c.name}`))
+    const payload: CommitmentInsert[] = toCopy.map(c => ({
       profile_id: activeProfile.id,
       category_id: c.category_id,
       account_id: c.account_id,
@@ -494,7 +504,9 @@ export default function CompromisosPage() {
       group_name: c.group_name,
       expected_amount: c.expected_amount,
       due_day: c.due_day,
-      payment_method: null,
+      // Se arrastra igual que matcher_hint: 'PAC' es lo que hace que run_pac_auto_charges
+      // genere el cobro del mes; copiarlo en null lo sacaba del cobro automático.
+      payment_method: c.payment_method,
       // El matcher_hint SE ARRASTRA (antes se copiaba en null). Es el texto corto que
       // linkCommitment (transfer-ingest) y detectTransaction buscan dentro del movimiento real
       // — sin él caen al nombre completo del compromiso ("Perlita - Vespucio Oriente"), que
@@ -508,7 +520,8 @@ export default function CompromisosPage() {
 
     if (!payload.length) {
       setCopying(false)
-      showToast(skipped > 0 ? 'Los compromisos del mes anterior tienen categorías retiradas' : 'El mes anterior no tiene compromisos')
+      showToast(toCopy.length < eligible.length ? 'Este mes ya tiene todos los compromisos del mes anterior'
+        : skipped > 0 ? 'Los compromisos del mes anterior tienen categorías retiradas' : 'El mes anterior no tiene compromisos')
       return
     }
     const { error: insertError } = await supabase.from('monthly_commitments').insert(payload)
@@ -855,7 +868,10 @@ function CommitmentModal({ profileId, month, categories, budgetByCategory, accou
       group_name: defaultGroup,
       expected_amount: amountN,
       due_day: dueN,
-      payment_method: null,
+      // El formulario no edita el medio de pago: se conserva el que tenía (ej. 'PAC', que es lo
+      // que hace que run_pac_auto_charges genere el cobro). Antes iba null fijo y editar
+      // cualquier dato de un PAC lo sacaba en silencio del cobro automático.
+      payment_method: commitment?.payment_method ?? null,
       // Va el valor del campo, NO null fijo: este payload se usa para insert Y para update,
       // así que hardcodear null borraba el hint aprendido cada vez que se editaba cualquier
       // otro dato del compromiso (monto, dia, cuenta), que es justo lo contrario de aprender.
